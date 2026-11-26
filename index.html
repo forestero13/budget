@@ -73,7 +73,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--ok);outlin
 </head>
 <body>
 <main>
-  <header><h1 id="period"></h1><button class="ib" id="setBtn">Settings</button></header>
+  <header><div><h1 id="period"></h1><div class="hint" id="syncLine" style="margin:0"></div></div><button class="ib" id="setBtn">Settings</button></header>
   <section class="hero" id="hero">
     <small id="heroLbl">Left to spend today</small>
     <div class="big" id="left">$0.00</div>
@@ -112,8 +112,20 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--ok);outlin
   <label for="cur">Currency symbol</label><input id="cur" maxlength="4">
   <div class="calc" id="calc"></div>
   <div class="acts"><button class="btn" id="setCancel">Cancel</button><button class="btn pri" id="setSave">Save</button></div>
+  <h3 style="margin-top:28px">Cloud sync</h3>
+  <div id="cloudOut">
+    <p class="hint">Sign in to back up to your Supabase database and sync between devices. The app still works offline.</p>
+    <label for="em">Email</label><input id="em" type="email" autocomplete="username">
+    <label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password">
+    <div class="acts"><button class="btn" id="signUp">Create account</button><button class="btn pri" id="signIn">Sign in</button></div>
+  </div>
+  <div id="cloudIn" hidden>
+    <p class="hint" id="cloudWho"></p>
+    <div class="acts"><button class="btn" id="signOut">Sign out</button><button class="btn pri" id="syncNow">Sync now</button></div>
+  </div>
+  <p class="hint" id="cloudMsg"></p>
   <h3 style="margin-top:28px">Your data</h3>
-  <p class="hint">Everything is stored only on this phone. Export a CSV now and then as a backup.</p>
+  <p class="hint">Export a CSV now and then as an extra backup.</p>
   <div class="acts"><button class="btn" id="expBtn">Export CSV</button><button class="btn" id="impBtn">Import CSV</button></div>
   <input type="file" id="impFile" accept=".csv,text/csv" hidden>
   <p class="hint" id="dataMsg"></p>
@@ -132,6 +144,8 @@ const INC_CATS=['Salary','Side income','Gift','Refund','Other'];
 let S;
 try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){}
 if(!S)S={settings:null,tx:[]};
+S.tx.forEach(x=>{if(x.upd==null){x.upd=x.ts||Date.now();x.dirty=true}});
+const live=()=>S.tx.filter(x=>!x.deleted);
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
 
@@ -157,7 +171,7 @@ function compute(){
   const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate()),t=iso(today);
   const P=period(today),st=S.settings||{inc:0,sav:0,fixed:[]};
   const fixed=(st.fixed||[]).reduce((a,f)=>a+num(f.amt),0);
-  const inP=S.tx.filter(x=>x.date>=P.s&&x.date<=P.e);
+  const inP=live().filter(x=>x.date>=P.s&&x.date<=P.e);
   const extra=inP.filter(x=>x.type==='inc').reduce((a,x)=>a+x.amt,0);
   const exp=inP.filter(x=>x.type==='exp');
   const before=exp.filter(x=>x.date<t).reduce((a,x)=>a+x.amt,0);
@@ -183,7 +197,7 @@ function render(){
 }
 
 function renderList(){
-  const tx=[...S.tx].sort((a,b)=>b.date.localeCompare(a.date)||b.ts-a.ts).slice(0,300);
+  const tx=live().sort((a,b)=>b.date.localeCompare(a.date)||b.ts-a.ts).slice(0,300);
   if(!tx.length){$('list').innerHTML='<p class="empty">No entries yet. Tap <b>+ Add expense</b> to log your first one.</p>';return}
   const g={};tx.forEach(x=>(g[x.date]=g[x.date]||[]).push(x));
   $('list').innerHTML=Object.keys(g).map(d=>{
@@ -201,7 +215,7 @@ function renderIns(c){
   const rows=Object.entries(by).sort((a,b)=>b[1]-a[1]);
   const days=[];const now=parse(c.t);
   for(let i=13;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()-i);const k=iso(d);
-    days.push({k,d,v:S.tx.filter(x=>x.type==='exp'&&x.date===k).reduce((a,x)=>a+x.amt,0)})}
+    days.push({k,d,v:live().filter(x=>x.type==='exp'&&x.date===k).reduce((a,x)=>a+x.amt,0)})}
   const mx=Math.max(...days.map(d=>d.v),c.daily>0?c.daily:0,1);
   const elapsed=dayDiff(c.P.start,now)+1;
   $('ins').innerHTML='<h2><span>Spent this period</span><span>'+esc(money(tot))+'</span></h2>'+
@@ -232,11 +246,11 @@ $('txCancel').onclick=()=>$('txSheet').classList.remove('open');
 $('txSave').onclick=()=>{
   const amt=Math.round(num($('txAmt').value)*100)/100;
   if(amt<=0){$('txAmt').focus();return}
-  const rec={id:edit?edit.id:uid(),ts:edit?edit.ts:Date.now(),type:kind,amt,cat,note:$('txNote').value.trim(),date:$('txDate').value||compute().t};
+  const rec={id:edit?edit.id:uid(),ts:edit?edit.ts:Date.now(),type:kind,amt,cat,note:$('txNote').value.trim(),date:$('txDate').value||compute().t,upd:Date.now(),dirty:true};
   S.tx=S.tx.filter(x=>x.id!==rec.id);S.tx.push(rec);save();
-  $('txSheet').classList.remove('open');render();
+  $('txSheet').classList.remove('open');render();sync();
 };
-$('txDel').onclick=()=>ask('Delete this entry?',()=>{S.tx=S.tx.filter(x=>x.id!==edit.id);save();$('txSheet').classList.remove('open');render()});
+$('txDel').onclick=()=>ask('Delete this entry?',()=>{const x=S.tx.find(t=>t.id===edit.id);if(x){x.deleted=true;x.upd=Date.now();x.dirty=true}save();$('txSheet').classList.remove('open');render();sync()});
 $('list').onclick=e=>{const r=e.target.closest('.row');if(r)openTx(S.tx.find(x=>x.id===r.dataset.id))};
 
 /* ---- confirm ---- */
@@ -267,22 +281,22 @@ function openSet(){
   const s=S.settings||{inc:'',sav:'',pay:1,cur:'$',fixed:[]};
   $('inc').value=s.inc||'';$('sav').value=s.sav||'';$('pay').value=s.pay||1;$('cur').value=s.cur||'$';
   $('fixed').innerHTML='';(s.fixed.length?s.fixed:[{name:'Rent',amt:''}]).forEach(fixedRow);
-  $('setCancel').hidden=!S.settings;$('dataMsg').textContent='';calc();$('setSheet').classList.add('open');
+  $('setCancel').hidden=!S.settings;$('dataMsg').textContent='';calc();cloudUI();$('setSheet').classList.add('open');
 }
 $('setSheet').addEventListener('input',calc);
 $('addFixed').onclick=()=>{fixedRow({});calc()};
 $('setBtn').onclick=openSet;
 $('setCancel').onclick=()=>$('setSheet').classList.remove('open');
-$('setSave').onclick=()=>{S.settings=readSet();save();$('setSheet').classList.remove('open');render()};
+$('setSave').onclick=()=>{S.settings=readSet();S.setUpd=Date.now();S.setDirty=true;save();$('setSheet').classList.remove('open');render();sync()};
 
 /* ---- CSV ---- */
 const q=v=>{v=String(v??'');return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
 $('expBtn').onclick=async()=>{
-  const csv='date,type,category,amount,note\n'+[...S.tx].sort((a,b)=>a.date.localeCompare(b.date)).map(x=>[x.date,x.type==='inc'?'income':'expense',x.cat,x.amt.toFixed(2),x.note].map(q).join(',')).join('\n');
+  const csv='date,type,category,amount,note\n'+live().sort((a,b)=>a.date.localeCompare(b.date)).map(x=>[x.date,x.type==='inc'?'income':'expense',x.cat,x.amt.toFixed(2),x.note].map(q).join(',')).join('\n');
   const name='budget-'+compute().t+'.csv',file=new File([csv],name,{type:'text/csv'});
   try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:name});return}}catch(e){if(e.name==='AbortError')return}
   const a=document.createElement('a');a.href=URL.createObjectURL(file);a.download=name;document.body.appendChild(a);a.click();a.remove();
-  $('dataMsg').textContent='Exported '+S.tx.length+' entries.';
+  $('dataMsg').textContent='Exported '+live().length+' entries.';
 };
 function parseCSV(t){
   const rows=[];let r=[],f='',i=0,inq=false;
@@ -298,20 +312,118 @@ $('impFile').onchange=async e=>{
   const rows=parseCSV(await file.text()).filter(r=>r.length>=4);
   if(rows.length&&/date/i.test(rows[0][0]))rows.shift();
   const keyOf=x=>[x.date,x.type,x.cat,x.amt.toFixed(2),x.note].join('|');
-  const have=new Set(S.tx.map(keyOf));let added=0;
-  rows.forEach(r=>{const x={id:uid(),ts:Date.now(),date:r[0].trim(),type:/inc/i.test(r[1])?'inc':'exp',cat:r[2]||'Other',amt:Math.round(num(r[3])*100)/100,note:r[4]||''};
+  const have=new Set(live().map(keyOf));let added=0;
+  rows.forEach(r=>{const x={id:uid(),ts:Date.now(),upd:Date.now(),dirty:true,date:r[0].trim(),type:/inc/i.test(r[1])?'inc':'exp',cat:r[2]||'Other',amt:Math.round(num(r[3])*100)/100,note:r[4]||''};
     if(/^\d{4}-\d{2}-\d{2}$/.test(x.date)&&x.amt>0&&!have.has(keyOf(x))){S.tx.push(x);have.add(keyOf(x));added++}});
-  save();render();e.target.value='';
+  save();render();sync();e.target.value='';
   $('dataMsg').textContent='Imported '+added+' new entries'+(rows.length-added?' (skipped '+(rows.length-added)+' duplicates or invalid rows)':'')+'.';
 };
+
+/* ---- cloud sync (Supabase) ---- */
+const SB='https://pyolwobglznxzzstzgbv.supabase.co',SK='sb_publishable_vtr6ugCkfXESCRZvdMjPrQ_uygxlBi7',AK='dailyBudget.auth';
+let A=null;try{A=JSON.parse(localStorage.getItem(AK))}catch(e){}
+const saveA=()=>{try{A?localStorage.setItem(AK,JSON.stringify(A)):localStorage.removeItem(AK)}catch(e){}};
+async function authCall(path,body){
+  const r=await fetch(SB+'/auth/v1/'+path,{method:'POST',headers:{apikey:SK,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){const e=new Error(j.msg||j.error_description||j.message||('Error '+r.status));e.status=r.status;throw e}
+  return j;
+}
+function setSess(j){A={at:j.access_token,rt:j.refresh_token,exp:Date.now()+(j.expires_in||3600)*1000,email:(j.user&&j.user.email)||(A&&A.email)||''};saveA()}
+async function token(){
+  if(Date.now()>A.exp-60000){
+    try{setSess(await authCall('token?grant_type=refresh_token',{refresh_token:A.rt}))}
+    catch(e){if(e.status>=400&&e.status<500){A=null;saveA();cloudUI();throw new Error('Session expired, sign in again in Settings')}throw e}
+  }
+  return A.at;
+}
+async function rest(path,opt={}){
+  const t=await token();
+  const r=await fetch(SB+'/rest/v1/'+path,{...opt,headers:{apikey:SK,Authorization:'Bearer '+t,'Content-Type':'application/json',...(opt.headers||{})}});
+  const tx=await r.text();
+  if(!r.ok){let m='Error '+r.status;try{m=JSON.parse(tx).message||m}catch(e){}throw new Error(m)}
+  return tx?JSON.parse(tx):null;
+}
+let busy=false,again=false,syncErr='';
+function syncLine(msg){
+  const el=$('syncLine');
+  if(!A){el.textContent='';return}
+  const pend=S.tx.filter(x=>x.dirty).length+(S.setDirty?1:0);
+  el.textContent=msg||(syncErr?'Sync: '+syncErr:(pend?pend+' change'+(pend>1?'s':'')+' waiting to sync':(S.lastSync?'Synced '+new Date(S.lastSync).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'')));
+}
+async function sync(){
+  if(!A){syncLine();return}
+  if(busy){again=true;return}
+  if(!navigator.onLine){syncErr='offline, will retry';syncLine();return}
+  busy=true;syncErr='';syncLine('Syncing…');
+  try{
+    const dirty=S.tx.filter(x=>x.dirty);
+    if(dirty.length){
+      const sent=new Map(dirty.map(x=>[x.id,x.upd]));
+      await rest('transactions?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
+        body:JSON.stringify(dirty.map(x=>({id:x.id,date:x.date,type:x.type,amount:x.amt,category:x.cat,note:x.note||'',deleted:!!x.deleted,updated_at:new Date(x.upd).toISOString()})))});
+      S.tx.forEach(x=>{if(x.dirty&&sent.get(x.id)===x.upd)x.dirty=false});
+    }
+    if(S.setDirty&&S.settings){
+      const u=S.setUpd;
+      await rest('settings?on_conflict=user_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
+        body:JSON.stringify({data:S.settings,updated_at:new Date(u).toISOString()})});
+      if(S.setUpd===u)S.setDirty=false;
+    }
+    const map=new Map(S.tx.map(x=>[x.id,x]));
+    for(let from=0;;from+=1000){
+      const rows=await rest('transactions?select=id,date,type,amount,category,note,deleted,updated_at&order=id',{headers:{Range:from+'-'+(from+999)}});
+      rows.forEach(r=>{
+        const ru=Date.parse(r.updated_at),l=map.get(r.id),v={upd:ru,date:r.date,type:r.type,amt:num(r.amount),cat:r.category,note:r.note||'',deleted:!!r.deleted};
+        if(!l){const n={id:r.id,ts:ru,...v};S.tx.push(n);map.set(r.id,n)}
+        else if(!l.dirty&&ru>l.upd)Object.assign(l,v);
+      });
+      if(rows.length<1000)break;
+    }
+    const st=await rest('settings?select=data,updated_at');
+    if(st&&st[0]){const ru=Date.parse(st[0].updated_at);if(!S.setDirty&&(!S.setUpd||ru>S.setUpd)){S.settings=st[0].data;S.setUpd=ru}}
+    S.lastSync=Date.now();save();render();
+  }catch(e){syncErr=e.message||'failed';save()}
+  busy=false;syncLine();
+  if(again){again=false;sync()}
+}
+function cloudUI(){
+  $('cloudOut').hidden=!!A;$('cloudIn').hidden=!A;
+  $('cloudWho').textContent=A?'Signed in as '+A.email:'';
+  $('cloudMsg').textContent=A&&syncErr?'Last sync error: '+syncErr:'';
+}
+async function afterLogin(){
+  S.tx.forEach(x=>x.dirty=true);
+  if(S.settings){S.setUpd=S.setUpd||Date.now();S.setDirty=true}
+  save();cloudUI();$('cloudMsg').textContent='Signed in. Syncing…';
+  await sync();
+  $('cloudMsg').textContent=syncErr?'Sync error: '+syncErr:'All synced.';
+  if(S.settings&&$('setSheet').classList.contains('open')){openSet();$('cloudMsg').textContent=syncErr?'Sync error: '+syncErr:'All synced.'}
+}
+async function login(kind){
+  const email=$('em').value.trim(),password=$('pw').value;
+  if(!email||password.length<6){$('cloudMsg').textContent='Enter your email and a password of at least 6 characters.';return}
+  $('cloudMsg').textContent=kind==='up'?'Creating account…':'Signing in…';
+  try{
+    const j=await authCall(kind==='up'?'signup':'token?grant_type=password',{email,password});
+    if(!j.access_token){$('cloudMsg').textContent='Account created. Confirm the email Supabase sent you, then tap Sign in.';return}
+    setSess(j);$('pw').value='';await afterLogin();
+  }catch(e){$('cloudMsg').textContent=e.message}
+}
+$('signIn').onclick=()=>login('in');
+$('signUp').onclick=()=>login('up');
+$('syncNow').onclick=async()=>{$('cloudMsg').textContent='Syncing…';await sync();$('cloudMsg').textContent=syncErr?'Sync error: '+syncErr:'All synced.'};
+$('signOut').onclick=()=>ask('Sign out? Your data stays on this phone, it just stops syncing.',()=>{A=null;saveA();cloudUI();syncLine()});
+window.addEventListener('online',()=>sync());
 
 /* ---- tabs & boot ---- */
 document.querySelector('.tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
   $('list').hidden=b.dataset.t!=='list';$('ins').hidden=b.dataset.t!=='ins'};
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)render()});
-render();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){render();sync()}});
+render();syncLine();
 if(!S.settings)openSet();
+sync();
 }
 </script>
 </body>
