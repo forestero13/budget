@@ -103,6 +103,7 @@ button.pt{font:inherit;font-size:12px;color:var(--mute);transition:opacity .12s}
 .heat i.l1{background:#115e59}.heat i.l2{background:#0d9488}.heat i.l3{background:var(--teal)}.heat i.fut{background:none}
 .sp{padding:8px 0;border-bottom:1px solid var(--line)}.sp:last-child{border-bottom:0}
 .sp .lr{padding:2px 0}.track{height:8px;background:var(--card2);border-radius:6px;overflow:hidden;margin-top:6px}.track i{display:block;height:100%;background:var(--exp)}
+.paycard b{display:block;font-size:16px}
 .hab b{display:block;font-size:15px}.hab p{margin:2px 0 12px;color:var(--mute);font-size:14px;line-height:1.4}.hab:last-child p{margin-bottom:0}
 .empty{color:var(--mute);text-align:center;padding:14px 4px;font-size:15px}
 .cust{display:block;margin:6px auto 16px;border:0;background:var(--card2);color:#818cf8;font:inherit;font-weight:700;border-radius:999px;min-height:44px;padding:0 22px}
@@ -215,6 +216,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <h3>Your budget</h3>
   <label for="inc">Monthly income</label><input id="inc" inputmode="decimal" placeholder="0.00">
   <label for="pay">Budget month starts on day (payday)</label><select id="pay"></select>
+  <label for="payd">This month I got paid on</label><input id="payd" type="date">
+  <p class="hint">Pay arrives a few days early or late? Set the real day here and the budget month moves with it.</p>
   <label for="wknd">If payday falls on a weekend</label><select id="wknd"><option value="before">I get paid the Friday before</option><option value="after">I get paid the Monday after</option><option value="same">Keep the exact day</option></select>
   <label for="trk">Start counting from (optional)</label><input id="trk" type="date">
   <p class="hint">Leave empty to count from the start of the budget month. Set it to the day you started logging so earlier days don't pile up.</p>
@@ -244,7 +247,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <div class="acts"><button class="btn" id="expBtn">Export CSV</button><button class="btn" id="impBtn">Import CSV</button></div>
   <input type="file" id="impFile" accept=".csv,text/csv" hidden>
   <p class="hint" id="dataMsg"></p>
-  <p class="hint" style="text-align:center;margin-top:24px">Version 2.9 · Nov 26, 2026</p>
+  <p class="hint" style="text-align:center;margin-top:24px">Version 3.0 · Nov 26, 2026</p>
 </div></div>
 
 <div class="sheet" id="cfSheet"><div class="panel">
@@ -316,11 +319,21 @@ function payDate(y,m){
   if(mode==='after'&&(w===0||w===6))return addD(d,w===6?2:1);
   return d;
 }
+/* actual payday for a month: the one you marked (within a week of the usual day), else the usual day */
+function cycleStart(y,m){
+  const pred=payDate(y,m),mk=(ST().paydays||[]).map(parse).filter(d=>Math.abs(dayDiff(pred,d))<=7).sort((a,b)=>a-b);
+  return mk.length?mk[mk.length-1]:pred;
+}
 function periodFor(day){
-  let y=day.getFullYear(),m=day.getMonth(),start=payDate(y,m);
-  if(day<start){start=payDate(y,m-1)}else{const nx=payDate(y,m+1);if(day>=nx)start=nx}
-  const end=addD(payDate(start.getFullYear(),start.getMonth()+1),-1);
+  const y=day.getFullYear(),m=day.getMonth();let i=1;
+  while(i>-3&&cycleStart(y,m+i)>day)i--;
+  const start=cycleStart(y,m+i),end=addD(cycleStart(y,m+i+1),-1);
   return{start,end,s:iso(start),e:iso(end),days:dayDiff(start,end)+1};
+}
+function markPayday(k){
+  ensureSettings();const near=d=>Math.abs(dayDiff(parse(d),parse(k)))<=10;
+  S.settings.paydays=[...(S.settings.paydays||[]).filter(d=>!near(d)),k].sort().slice(-36);
+  touchSettings();
 }
 /* expense portion inside [s,e], honouring spread-out days */
 function portion(x,s,e){
@@ -379,6 +392,15 @@ function periodsBack(n){let p=C.P;const out=[p];for(let k=1;k<n;k++){p=periodFor
 function barCard(title,vals,col,foot){
   const mx=Math.max(...vals.map(v=>v.v),1);
   return '<div class="card">'+head(title)+'<div class="bars">'+vals.map(v=>'<div><em>'+(v.v?esc(short(v.v)):'')+'</em><i style="height:'+(v.v/mx*100)+'%;background:'+col+'"></i>'+esc(v.l)+'</div>').join('')+'</div>'+(foot?'<p class="hint">'+esc(foot)+'</p>':'')+'</div>';
+}
+function payBanner(){
+  const t=C.today,next=addD(C.P.end,1),daysTo=dayDiff(t,next),sinceStart=dayDiff(C.P.start,t);
+  const marked=(ST().paydays||[]).some(d=>d===C.P.s);
+  let msg='';
+  if(daysTo>=1&&daysTo<=4)msg='Payday is around '+fmtD(next,{weekday:'short',month:'short',day:'numeric'})+'. Did your pay arrive early?';
+  else if(sinceStart<=3&&!marked)msg='New budget month started '+fmtD(C.P.start,{weekday:'short',month:'short',day:'numeric'})+'. Did your pay arrive?';
+  if(!msg||localStorage.getItem('payNo')===C.t)return '';
+  return '<div class="card paycard"><b>'+esc(msg)+'</b><div class="acts" style="position:static;padding:0;margin-top:10px"><button class="btn" data-pay="no">Not yet</button><button class="btn pri" data-pay="yes">Yes, it arrived today</button></div>'+(sinceStart<=3&&!marked&&sinceStart>0?'<p class="hint">If it came on another day, set it in Settings \u2192 This month I got paid on.</p>':'')+'</div>';
 }
 cardMap={
   habits(){
@@ -512,7 +534,7 @@ function render(){
   if(mode==='jar'){
     const [a,b]=scopeRange(),tx=live().filter(x=>isSaving(x)&&x.date>=a&&x.date<=b).concat(C.rolls.filter(r=>r.date>=a&&r.date<=b).map(r=>({id:'roll-'+r.date,ts:0,type:'sav',cat:'jar',amt:r.amt,note:'Left over from '+fmtD(r.from,{month:'long'}),date:r.date,spread:1}))).sort((p,q)=>q.date.localeCompare(p.date)||q.ts-p.ts).slice(0,20);
     $('feed').innerHTML='<div class="card">'+head('Jar activity')+(tx.length?tx.map(x=>actRow(x,true)).join(''):'<p class="empty">No activity yet. Tap Add Money to set money aside.</p>')+'</div>'+cardMap.goals();
-  }else $('feed').innerHTML=cardOrder().filter(c=>c.on).map(c=>cardMap[c.id]()).join('');
+  }else $('feed').innerHTML=payBanner()+cardOrder().filter(c=>c.on).map(c=>cardMap[c.id]()).join('');
   syncLine();
 }
 /* number shrinks and slides into the top bar as you scroll.
@@ -621,6 +643,8 @@ $('jSave').onclick=()=>{
   closeSheet('jarSheet');render();sync();
 };
 $('jDel').onclick=()=>ask('Delete this entry?',()=>{const x=S.tx.find(t=>t.id===jEdit.id);if(x)delTx(x);save();closeSheet('jarSheet');render();sync()});
+$('feed').addEventListener('click',e=>{const b=e.target.closest('[data-pay]');if(!b)return;e.stopPropagation();
+  if(b.dataset.pay==='yes'){markPayday(C.t);render();sync()}else{try{localStorage.setItem('payNo',C.t)}catch(x){}render()}},true);
 $('feed').onclick=e=>{
   const b=e.target.closest('[data-day],[data-act],[data-goal],[data-id]');if(!b)return;
   if(b.dataset.day){selDay=b.dataset.day;render();return}
@@ -752,7 +776,7 @@ function calc(){
 }
 function openSet(){
   const s=ST();
-  $('inc').value=s.inc||'';$('sav').value=s.sav||'';$('pay').value=s.pay||1;$('cur').value=s.cur||'$';$('trk').value=s.track||'';$('wknd').value=s.wknd||'before';$('debtMode').value=s.debt||'spread';
+  $('inc').value=s.inc||'';$('sav').value=s.sav||'';$('pay').value=s.pay||1;$('cur').value=s.cur||'$';$('trk').value=s.track||'';$('wknd').value=s.wknd||'before';$('payd').value=compute().P.s;$('debtMode').value=s.debt||'spread';
   $('fixed').innerHTML='';((s.fixed||[]).length?s.fixed:[{name:'Rent',amt:''}]).forEach(fixedRow);
   $('setCancel').hidden=!S.settings;$('dataMsg').textContent='';calc();cloudUI();openSheet('setSheet');
 }
@@ -760,7 +784,7 @@ $('setSheet').addEventListener('input',calc);
 $('addFixed').onclick=()=>{fixedRow({});calc()};
 $('setBtn').onclick=openSet;
 $('setCancel').onclick=()=>closeSheet('setSheet');
-$('setSave').onclick=()=>{S.settings=readSet();touchSettings();closeSheet('setSheet');render();sync()};
+$('setSave').onclick=()=>{const pd=$('payd').value,was=compute().P.s;S.settings=readSet();if(pd&&pd!==was)markPayday(pd);touchSettings();closeSheet('setSheet');render();sync()};
 
 /* ---------- CSV ---------- */
 const q=v=>{v=String(v??'');return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
