@@ -215,6 +215,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <h3>Your budget</h3>
   <label for="inc">Monthly income</label><input id="inc" inputmode="decimal" placeholder="0.00">
   <label for="pay">Budget month starts on day (payday)</label><select id="pay"></select>
+  <label for="wknd">If payday falls on a weekend</label><select id="wknd"><option value="before">I get paid the Friday before</option><option value="after">I get paid the Monday after</option><option value="same">Keep the exact day</option></select>
   <label for="trk">Start counting from (optional)</label><input id="trk" type="date">
   <p class="hint">Leave empty to count from the start of the budget month. Set it to the day you started logging so earlier days don't pile up.</p>
   <label>Fixed monthly costs (rent, bills, subscriptions)</label>
@@ -243,7 +244,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <div class="acts"><button class="btn" id="expBtn">Export CSV</button><button class="btn" id="impBtn">Import CSV</button></div>
   <input type="file" id="impFile" accept=".csv,text/csv" hidden>
   <p class="hint" id="dataMsg"></p>
-  <p class="hint" style="text-align:center;margin-top:24px">Version 2.8 · Nov 26, 2026</p>
+  <p class="hint" style="text-align:center;margin-top:24px">Version 2.9 · Nov 26, 2026</p>
 </div></div>
 
 <div class="sheet" id="cfSheet"><div class="panel">
@@ -308,10 +309,17 @@ const incExtra=(s,e)=>live().reduce((t,x)=>t+(x.type==='inc'&&x.cat!=='__jar'?po
 let mode='budget',scope='m';
 const fmtD=(d,o)=>d.toLocaleDateString(undefined,o);
 
+/* payday for a given month, moved off weekends the way banks do it */
+function payDate(y,m){
+  const st=ST(),p=st.pay||1,d=new Date(y,m,p),w=d.getDay(),mode=st.wknd||'before';
+  if(mode==='before'&&(w===0||w===6))return addD(d,w===6?-1:-2);
+  if(mode==='after'&&(w===0||w===6))return addD(d,w===6?2:1);
+  return d;
+}
 function periodFor(day){
-  const p=ST().pay||1;let y=day.getFullYear(),m=day.getMonth();
-  if(day.getDate()<p){m--;if(m<0){m=11;y--}}
-  const start=new Date(y,m,p),end=new Date(y,m+1,p-1);
+  let y=day.getFullYear(),m=day.getMonth(),start=payDate(y,m);
+  if(day<start){start=payDate(y,m-1)}else{const nx=payDate(y,m+1);if(day>=nx)start=nx}
+  const end=addD(payDate(start.getFullYear(),start.getMonth()+1),-1);
   return{start,end,s:iso(start),e:iso(end),days:dayDiff(start,end)+1};
 }
 /* expense portion inside [s,e], honouring spread-out days */
@@ -367,7 +375,7 @@ function actRow(x,jv){
   const when=fmtD(parse(x.date),{month:'short',day:'numeric'})+(x.spread>1?' · over '+x.spread+' days':'');
   return '<div class="act" data-id="'+esc(x.id)+'"><div class="ico" style="background:'+col+'">'+esc((isJar(x)?'J':label.replace('Saved · ','')).slice(0,1).toUpperCase())+'</div><div class="t"><div>'+esc(label)+'</div><small>'+esc(x.note||when)+'</small></div><div class="a'+((jv?isS:isI)?' pos':'')+'">'+((jv?isS:isI)?'+':'-')+esc(money(x.amt))+'<small>'+esc(x.note?when:'')+'</small></div></div>';
 }
-function periodsBack(n){const out=[];for(let k=n-1;k>=0;k--){const P=C.P,d=new Date(P.start.getFullYear(),P.start.getMonth()-k,P.start.getDate());out.push(periodFor(d))}return out}
+function periodsBack(n){let p=C.P;const out=[p];for(let k=1;k<n;k++){p=periodFor(addD(p.start,-1));out.unshift(p)}return out}
 function barCard(title,vals,col,foot){
   const mx=Math.max(...vals.map(v=>v.v),1);
   return '<div class="card">'+head(title)+'<div class="bars">'+vals.map(v=>'<div><em>'+(v.v?esc(short(v.v)):'')+'</em><i style="height:'+(v.v/mx*100)+'%;background:'+col+'"></i>'+esc(v.l)+'</div>').join('')+'</div>'+(foot?'<p class="hint">'+esc(foot)+'</p>':'')+'</div>';
@@ -734,7 +742,7 @@ function fixedRow(f){
   $('fixed').appendChild(d);
 }
 function readSet(){
-  return{...ST(),inc:num($('inc').value),sav:num($('sav').value),pay:+$('pay').value||1,cur:$('cur').value.trim()||'$',track:$('trk').value||'',debt:$('debtMode').value,
+  return{...ST(),inc:num($('inc').value),sav:num($('sav').value),pay:+$('pay').value||1,wknd:$('wknd').value,cur:$('cur').value.trim()||'$',track:$('trk').value||'',debt:$('debtMode').value,
     fixed:[...document.querySelectorAll('#fixed .fx')].map(d=>({name:d.querySelector('.fn').value.trim(),amt:num(d.querySelector('.fa').value)})).filter(f=>f.name||f.amt)};
 }
 function calc(){
@@ -744,7 +752,7 @@ function calc(){
 }
 function openSet(){
   const s=ST();
-  $('inc').value=s.inc||'';$('sav').value=s.sav||'';$('pay').value=s.pay||1;$('cur').value=s.cur||'$';$('trk').value=s.track||'';$('debtMode').value=s.debt||'spread';
+  $('inc').value=s.inc||'';$('sav').value=s.sav||'';$('pay').value=s.pay||1;$('cur').value=s.cur||'$';$('trk').value=s.track||'';$('wknd').value=s.wknd||'before';$('debtMode').value=s.debt||'spread';
   $('fixed').innerHTML='';((s.fixed||[]).length?s.fixed:[{name:'Rent',amt:''}]).forEach(fixedRow);
   $('setCancel').hidden=!S.settings;$('dataMsg').textContent='';calc();cloudUI();openSheet('setSheet');
 }
