@@ -218,7 +218,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <div class="acts"><button class="btn" id="expBtn">Export CSV</button><button class="btn" id="impBtn">Import CSV</button></div>
   <input type="file" id="impFile" accept=".csv,text/csv" hidden>
   <p class="hint" id="dataMsg"></p>
-  <p class="hint" style="text-align:center;margin-top:24px">Version 2.2 · Nov 26, 2026</p>
+  <p class="hint" style="text-align:center;margin-top:24px">Version 2.3 · Nov 26, 2026</p>
 </div></div>
 
 <div class="sheet" id="cfSheet"><div class="panel">
@@ -256,7 +256,10 @@ const ST=()=>S.settings||{inc:0,sav:0,pay:1,cur:'$',fixed:[],goals:[],cards:null
 const goals=()=>ST().goals||[];
 const goalName=id=>(goals().find(g=>g.id===id)||{}).name||'Savings';
 const isJar=x=>(x.type==='sav'&&x.cat==='jar')||(x.type==='inc'&&x.cat==='__jar');
-const jarNet=(s,e)=>live().reduce((t,x)=>t+(x.date>=s&&x.date<=e?(x.type==='sav'&&x.cat==='jar'?x.amt:x.type==='inc'&&x.cat==='__jar'?-x.amt:0):0),0);
+/* jar = every saving entry (jar + goal deposits) minus withdrawals, plus the monthly savings plan set aside so far */
+function planIn(s,e){if(!C||!C.sv)return 0;const lo=s>C.ts?s:C.ts,hi=e<C.t?e:C.t;return hi>=lo?C.sv/C.P.days*(dayDiff(parse(lo),parse(hi))+1):0}
+const jarNet=(s,e)=>live().reduce((t,x)=>t+(x.date>=s&&x.date<=e?(x.type==='sav'?x.amt:x.type==='inc'&&x.cat==='__jar'?-x.amt:0):0),0)+planIn(s,e);
+const isSaving=x=>x.type==='sav'||(x.type==='inc'&&x.cat==='__jar');
 const incExtra=(s,e)=>live().reduce((t,x)=>t+(x.type==='inc'&&x.cat!=='__jar'&&x.date>=s&&x.date<=e?x.amt:0),0);
 let mode='budget',scope='m';
 const fmtD=(d,o)=>d.toLocaleDateString(undefined,o);
@@ -289,7 +292,7 @@ function compute(){
   for(let i=1;i<=2;i++){const d=addD(today,i),k=iso(d);if(k>P.e)break;proj.push({d,v:proj[i-1].v+allow+typeIn('inc',k,k)-outIn(k,k)})}
   const tm=iso(addD(today,1));
   const periodLeft=left+(t<P.e?allow*dayDiff(today,P.end)+typeIn('inc',tm,P.e)-outIn(tm,P.e):0);
-  return{t,today,P,inc,fx,sv,allow,budget,spentToday,left,proj,periodLeft};
+  return{t,ts,today,P,inc,fx,sv,allow,budget,spentToday,left,proj,periodLeft};
 }
 
 /* ---------- rendering ---------- */
@@ -389,11 +392,11 @@ function cardOrder(){
 function scopeRange(){const y=C.today.getFullYear();return scope==='m'?[C.P.s,C.P.e]:scope==='y'?[y+'-01-01',y+'-12-31']:['0000-01-01','9999-12-31']}
 function renderJarHero(){
   $('hero').classList.remove('over');
-  const [a,b]=scopeRange(),v=jarNet(a,b),bal=jarNet('0000-01-01','9999-12-31'),end=bal+Math.max(0,C.periodLeft);
+  const [a,b]=scopeRange(),v=jarNet(a,b),bal=jarNet('0000-01-01','9999-12-31'),rest=Math.max(0,C.periodLeft)+(C.t<C.P.e?C.sv/C.P.days*dayDiff(C.today,C.P.end):0),end=bal+rest;
   $('scM').textContent=fmtD(C.P.start,{month:'long'});$('scY').textContent=C.today.getFullYear();
   document.querySelectorAll('#scope button').forEach(x=>x.classList.toggle('on',x.dataset.s===scope));
   $('heroLbl').textContent='Savings jar';$('left').textContent=money(v);
-  $('heroSub').textContent=scope==='a'?'Stay on budget and '+money(Math.max(0,C.periodLeft))+' more lands here':(scope==='m'?'Saved this budget month':'Saved this year')+' \u00b7 '+money(bal)+' in total';
+  $('heroSub').textContent=(scope==='a'?'Saved in total':scope==='m'?'Saved this budget month':'Saved this year')+' \u00b7 stay on budget and '+money(rest)+' more lands here';
   const ys=[60,end>bal?28:60];
   $('proj').innerHTML='<svg viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="0" y1="'+ys[0]+'" x2="100" y2="'+ys[1]+'" stroke="#f2f4f7" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>'+
     '<div class="pt" style="left:18%;top:'+ys[0]+'%">Now<b>'+esc(money(bal))+'</b></div><div class="pt" style="left:78%;top:'+(ys[0]+(ys[1]-ys[0])*.78)+'%">End of month<b>'+esc(money(end))+'</b></div>';
@@ -416,7 +419,7 @@ function renderHero(){
 function render(){
   C=compute();renderHero();
   if(mode==='jar'){
-    const [a,b]=scopeRange(),tx=live().filter(x=>isJar(x)&&x.date>=a&&x.date<=b).sort((p,q)=>q.date.localeCompare(p.date)||q.ts-p.ts).slice(0,20);
+    const [a,b]=scopeRange(),tx=live().filter(x=>isSaving(x)&&x.date>=a&&x.date<=b).sort((p,q)=>q.date.localeCompare(p.date)||q.ts-p.ts).slice(0,20);
     $('feed').innerHTML='<div class="card">'+head('Jar activity')+(tx.length?tx.map(actRow).join(''):'<p class="empty">No activity yet. Tap Add Money to set money aside.</p>')+'</div>'+cardMap.goals();
   }else $('feed').innerHTML=cardOrder().filter(c=>c.on).map(c=>cardMap[c.id]()).join('');
   syncLine();
