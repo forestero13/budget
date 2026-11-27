@@ -22,7 +22,12 @@ body.jar{--bg:#110a16;--card:#1a141f;--card2:#251c2b;--line:#33283a;--bgr:17,10,
 .top{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:10px;padding:calc(8px + env(safe-area-inset-top)) 14px 8px;background:linear-gradient(rgba(var(--bgr),var(--p)) 75%,transparent)}
 .rb{width:44px;height:44px;flex:none;border:0;border-radius:50%;background:rgba(30,34,41,var(--p));color:var(--ink);display:grid;place-items:center}
 .rb svg{width:20px;height:20px}
-.pill{flex:1;background:rgba(30,34,41,var(--p));border-radius:999px;min-height:44px;display:grid;place-items:center}
+.pill{position:relative;flex:1;background:rgba(30,34,41,var(--p));border-radius:999px;min-height:44px;display:grid;place-items:center}
+/* copy of the number that lives in the header once it has docked, so overscroll can't pull them apart */
+.dock{position:absolute;inset:0;display:grid;place-items:center;opacity:0;pointer-events:none}
+.dock span{display:block;text-align:center;font-size:19px;font-weight:800;letter-spacing:-.02em;line-height:1.05;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--teal)}
+.dock.over span{color:var(--bad)}
+body.jar .dock span{background:linear-gradient(90deg,#f0abfc,#c026d3 45%,#9333ea);-webkit-background-clip:text;background-clip:text;color:transparent}
 body.jar .pill{background:rgba(37,28,43,var(--p))}
 .scope{display:none;gap:2px;background:#251c2b;border-radius:999px;padding:3px;opacity:calc(1 - var(--p)*3)}
 body.jar .scope{display:flex}
@@ -148,7 +153,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
 <body>
 <div class="top" id="top">
   <button class="rb" id="setBtn" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg></button>
-  <div class="pill" id="pill"><div class="scope" id="scope"><button data-s="m" class="on" id="scM">Month</button><button data-s="y" id="scY">Year</button><button data-s="a">All</button></div></div>
+  <div class="pill" id="pill"><div class="dock" id="dock" aria-hidden="true"><span id="dockN"></span></div><div class="scope" id="scope"><button data-s="m" class="on" id="scM">Month</button><button data-s="y" id="scY">Year</button><button data-s="a">All</button></div></div>
   <button class="tog" id="jarTog" aria-label="Switch between budget and savings jar"><i>$</i></button>
   <button class="rb" id="findBtn" aria-label="Search entries"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></button>
 </div>
@@ -247,7 +252,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <div class="acts"><button class="btn" id="expBtn">Export CSV</button><button class="btn" id="impBtn">Import CSV</button></div>
   <input type="file" id="impFile" accept=".csv,text/csv" hidden>
   <p class="hint" id="dataMsg"></p>
-  <p class="hint" style="text-align:center;margin-top:24px">Version 3.4 · Nov 27, 2026</p>
+  <p class="hint" style="text-align:center;margin-top:24px">Version 3.5 · Nov 27, 2026</p>
 </div></div>
 
 <div class="sheet" id="cfSheet"><div class="panel">
@@ -426,7 +431,7 @@ cardMap={
     return '<div class="card">'+head('Habits & tips')+out.sort((a,b)=>b[0]-a[0]).slice(0,3).map(([_,h,b])=>'<div class="hab"><b>'+esc(h)+'</b><p>'+esc(b)+'</p></div>').join('')+'</div>';
   },
   daily(){
-    const sd=selDay||C.t,d=parse(sd),ws=addD(d,-d.getDay()),days=C.P.days;
+    const sd=selDay||C.t,d=parse(sd),ws=addD(d,-d.getDay());
     const wk=[...Array(7)].map((_,i)=>{const x=addD(ws,i),k=iso(x);return '<button data-day="'+k+'" class="'+(k===sd?'on ':'')+(k===C.t?'td':'')+'"><small>'+fmtD(x,{weekday:'short'}).slice(0,2)+'</small><i>'+x.getDate()+'</i></button>'}).join('');
     const P=periodFor(d),incS=C.inc/P.days,fxS=C.fx/P.days,svS=C.sv/P.days,ex=typeIn('inc',sd,sd),sp=expIn(sd,sd),gs=typeIn('sav',sd,sd);
     const pb=sd>=C.ts&&sd<=C.P.e?C.pay+(C.once&&sd===C.ts?C.debt:0):0,net=incS+ex-fxS-svS-sp-gs-pb;
@@ -498,25 +503,25 @@ function cardOrder(){
 }
 function scopeRange(){const y=C.today.getFullYear();return scope==='m'?[C.P.s,C.P.e]:scope==='y'?[y+'-01-01',y+'-12-31']:['0000-01-01','9999-12-31']}
 function renderJarHero(){
-  $('hero').classList.remove('over');
-  const [a,b]=scopeRange(),v=jarNet(a,b),bal=jarNet('0000-01-01','9999-12-31'),rest=Math.max(0,C.periodLeft)+(C.t<C.P.e?C.sv/C.P.days*dayDiff(C.today,C.P.end):0),end=bal+rest;
+  const [a,b]=scopeRange(),v=jarNet(a,b),bal=jarNet('0000-01-01','9999-12-31'),rest=Math.max(0,C.periodLeft),end=bal+rest;
   $('scM').textContent=fmtD(C.P.start,{month:'long'});$('scY').textContent=C.today.getFullYear();
   document.querySelectorAll('#scope button').forEach(x=>x.classList.toggle('on',x.dataset.s===scope));
-  $('heroLbl').textContent='Savings jar';$('left').textContent=money(v);
+  $('heroLbl').textContent='Savings jar';setNum(money(v),false);
   $('heroSub').textContent=(scope==='a'?'Saved in total':scope==='m'?'Saved this budget month':'Saved this year')+' \u00b7 stay on budget and '+money(rest)+' more lands here';
   const ys=[60,end>bal?28:60];
   $('proj').innerHTML='<svg viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="0" y1="'+ys[0]+'" x2="100" y2="'+ys[1]+'" stroke="#f2f4f7" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>'+
     '<div class="pt" style="left:18%;top:'+ys[0]+'%">Now<b>'+esc(money(bal))+'</b></div><div class="pt" style="left:78%;top:'+(ys[0]+(ys[1]-ys[0])*.78)+'%">End of month<b>'+esc(money(end))+'</b></div>';
 }
+function setNum(txt,neg){$('left').textContent=txt;$('dockN').textContent=txt;$('hero').classList.toggle('over',neg);$('dock').classList.toggle('over',neg)}
 function renderHero(){
   if(mode==='jar')return renderJarHero();
   const neg=C.left<0;
-  $('hero').classList.toggle('over',neg);
   $('heroLbl').textContent=neg?'Over today’s budget':'Today’s Budget';
-  $('left').textContent=money(C.left);
+  setNum(money(C.left),neg);
   const back=neg?C.proj.find(p=>p.v>=0):null;
   if(neg){$('heroSub').textContent=back?'Spend nothing and you\u2019re back above '+money(0)+' '+(back===C.proj[1]?'tomorrow':'on '+fmtD(back.d,{weekday:'short',month:'short',day:'numeric'})):'Spending nothing won\u2019t get you above '+money(0)+' before '+fmtD(addD(C.P.end,1),{month:'short',day:'numeric'})}
   else $('heroSub').textContent=(C.debt?'Paying back '+money(C.debt)+' overspent last month · ':'Spent today '+money(C.spentToday)+' · ')+money(C.periodLeft)+' left until '+fmtD(C.P.end,{month:'short',day:'numeric'});
+  const oldSc=$('pscroll'),keepX=oldSc?oldSc.scrollLeft:0;
   const pr=C.proj,H=$('proj').clientHeight||300,GAP=118,X0=Math.round(Math.min(innerWidth,560)*.16);
   /* zoomed scale: about 4 days fill the height; the view follows the line as you swipe */
   const vs=pr.map(p=>p.v),hi=Math.max(...vs,neg?0:-Infinity),lo=Math.min(...vs,neg?0:Infinity);
@@ -532,14 +537,23 @@ function renderHero(){
     pr.map((p,i)=>'<button class="pt'+(p.v<0?' neg':'')+'" data-pi="'+i+'" style="left:'+xs[i]+'px;top:'+ys[i].toFixed(1)+'px">'+(i?esc(i<7?fmtD(p.d,{weekday:'short'}):fmtD(p.d,{weekday:'short'})+' '+p.d.getDate()):'Today')+'<b>'+esc(money(p.v))+'</b></button>').join('')+
     '<div class="pt" style="left:'+(X0+pr.length*GAP-20)+'px;top:'+Math.max(30,ly-70).toFixed(0)+'px;border-color:var(--line)">New month<b>'+esc(nm)+'</b></div>'+
     '</div></div>'+(pr.length>3?'<div class="phint">Swipe to see each day if you spend nothing \u2192</div>':'');
-  const sc=$('pscroll'),tr=$('ptrack');let raf=0;
-  /* camera follows the line continuously: height of the line at the centre of the view, softened over a day either side */
-  const n=ys.length,yAt=x=>{if(x<=xs[0])return ys[0];if(x>=xs[n-1])return ys[n-1];const i=Math.min(n-2,Math.floor((x-X0)/GAP));return ys[i]+(ys[i+1]-ys[i])*(x-xs[i])/GAP};
-  const cam=()=>{const c=sc.scrollLeft+sc.clientWidth/2,y=(yAt(c-GAP)+2*yAt(c)+yAt(c+GAP))/4,off=Math.max(0,Math.min(TH-H,y-H*.5));
-    tr.style.transform='translate3d(0,'+(-off).toFixed(2)+'px,0)'};
-  cam();
-  sc.addEventListener('scroll',()=>{if(!raf)raf=requestAnimationFrame(()=>{raf=0;cam()})},{passive:true});
-  $('pscroll').addEventListener('scroll',()=>{if(tipI>=0)closeTip()},{passive:true});
+  const sc=$('pscroll'),tr=$('ptrack');
+  sc.scrollLeft=keepX;
+  /* camera: keeps the line vertically centred as you swipe. It is a smooth function of the scroll position
+     (line height at the centre of the view, averaged over a day either side), so there are no steps to snap to. */
+  const n=ys.length,vw=sc.clientWidth,maxS=Math.max(1,W-vw);
+  const yAt=x=>{if(x<=xs[0])return ys[0];if(x>=xs[n-1])return ys[n-1];const i=Math.min(n-2,Math.floor((x-X0)/GAP));return ys[i]+(ys[i+1]-ys[i])*(x-xs[i])/GAP};
+  const offAt=sl=>{const c=sl+vw/2,h=GAP/2,y=(yAt(c-2*h)+2*yAt(c-h)+3*yAt(c)+2*yAt(c+h)+yAt(c+2*h))/9;return Math.max(0,Math.min(TH-H,y-H*.5))};
+  if(SDA){
+    /* Safari 26+: the camera runs as a scroll-driven animation on the compositor, in the same frame as the swipe */
+    let kf='';const st=GAP/8;for(let x=0;x<maxS+st;x+=st){const sl=Math.min(x,maxS);kf+=(sl/maxS*100).toFixed(3)+'%{transform:translate3d(0,'+(-offAt(sl)).toFixed(2)+'px,0)}';if(sl>=maxS)break}
+    if(!camCss){camCss=document.createElement('style');document.head.appendChild(camCss)}
+    camCss.textContent='@keyframes pcam{'+kf+'}#ptrack{animation:pcam linear both;animation-timeline:scroll(nearest inline)}';
+  }else{
+    let raf=0;const cam=()=>{tr.style.transform='translate3d(0,'+(-offAt(sc.scrollLeft)).toFixed(2)+'px,0)'};
+    cam();sc.addEventListener('scroll',()=>{if(!raf)raf=requestAnimationFrame(()=>{raf=0;cam()})},{passive:true});
+  }
+  sc.addEventListener('scroll',()=>{if(tipI>=0)closeTip()},{passive:true});
 }
 function render(){
   LIVE=null;tipI=-1;C=compute();if(geo)requestAnimationFrame(()=>measure());renderHero();
@@ -553,43 +567,50 @@ function render(){
    Safari 26+: CSS scroll-driven animation, run by the compositor in the same frame as the scroll.
    Older browsers: per-frame JS fallback. */
 const SDA=!!(window.CSS&&CSS.supports&&CSS.supports('animation-timeline: scroll()'));
-let geo=null,tick=false,sdaCss=null;
-const NUM_ELS=()=>[$('left'),$('heroLbl'),$('heroSub'),$('top')];
+let geo=null,tick=false,sdaCss=null,camCss=null,flipping=false;
+const NUM_ELS=()=>[$('left'),$('heroLbl'),$('heroSub'),$('top'),$('dock')];
+/* reads where the number sits without its scroll transform: the transform scales around the centre,
+   so the untransformed centre is the drawn centre minus the translation. No animation restarts, no style churn. */
 function measure(){
-  if(sheets.length)return;
-  const el=$('left');
-  NUM_ELS().forEach(e=>{e.style.animation='none';e.style.transform='';e.style.opacity=''});
-  const r=el.getBoundingClientRect(),pr=$('pill').getBoundingClientRect();
-  geo={c0:r.top+scrollY+r.height/2,pc:pr.top+pr.height/2,dx:(pr.left+pr.width/2)-(r.left+r.width/2),endS:19/parseFloat(getComputedStyle(el).fontSize)};
+  if(sheets.length||flipping)return;
+  const el=$('left'),cs=getComputedStyle(el),m=cs.transform&&cs.transform!=='none'?new DOMMatrixReadOnly(cs.transform):{a:1,e:0,f:0};
+  const r=el.getBoundingClientRect(),pr=$('pill').getBoundingClientRect(),k=m.a||1;
+  const cx=r.left+r.width/2-m.e,cy=r.top+r.height/2-m.f,endS=19/parseFloat(cs.fontSize);
+  geo={c0:cy+scrollY,pc:pr.top+pr.height/2,dx:(pr.left+pr.width/2)-cx,endS};
+  /* the header copy gets the same width as the shrunken number, so the jar gradient lines up exactly */
+  $('dockN').style.width=(r.width/k*endS).toFixed(1)+'px';
   if(SDA){
     const D=Math.max(1,geo.c0-geo.pc),N=Math.max(1,document.documentElement.scrollHeight-innerHeight),f=n=>Math.min(100,n/N*100).toFixed(4)+'%';
     const at=y=>{const p=Math.min(1,y/D);return 'translate3d('+(geo.dx*p).toFixed(2)+'px,'+Math.max(0,y-D).toFixed(2)+'px,0) scale('+(1+(geo.endS-1)*p).toFixed(4)+')'};
-    const css='@keyframes numDock{0%{transform:'+at(0)+'}'+(D<N?f(D)+'{transform:'+at(D)+'}':'')+'100%{transform:'+at(N)+'}}'+
+    const docks=D<N,sw=docks?'{opacity:1}'+(Math.min(100,D/N*100+.01)).toFixed(4)+'%':'';
+    const css='@keyframes numDock{0%{transform:'+at(0)+'}'+(docks?f(D)+'{transform:'+at(D)+'}':'')+'100%{transform:'+at(N)+'}}'+
+      '@keyframes numHide{0%{opacity:1}'+(docks?f(D)+sw+'{opacity:0}100%{opacity:0}':'100%{opacity:1}')+'}'+
+      '@keyframes dockShow{0%{opacity:0}'+(docks?f(D)+'{opacity:0}'+(Math.min(100,D/N*100+.01)).toFixed(4)+'%{opacity:1}100%{opacity:1}':'100%{opacity:0}')+'}'+
       '@keyframes lblFade{0%{opacity:1}'+(D/2.2<N?f(D/2.2)+'{opacity:0}':'')+'100%{opacity:'+Math.max(0,1-N/D*2.2)+'}}'+
       '@keyframes barFade{0%{--p:0}'+(D*.55<N?f(D*.55)+'{--p:0}':'')+(D<N?f(D)+'{--p:1}':'')+'100%{--p:'+Math.min(1,Math.max(0,(N/D-.55)/.45))+'}}'+
-      '#left{animation:numDock linear both;animation-timeline:scroll(root)}#heroLbl,#heroSub{animation:lblFade linear both;animation-timeline:scroll(root)}#top{animation:barFade linear both;animation-timeline:scroll(root)}';
+      '#left{animation:numDock linear both,numHide linear both;animation-timeline:scroll(root),scroll(root)}#dock{animation:dockShow linear both;animation-timeline:scroll(root)}'+
+      '#heroLbl,#heroSub{animation:lblFade linear both;animation-timeline:scroll(root)}#top{animation:barFade linear both;animation-timeline:scroll(root)}';
     if(!sdaCss){sdaCss=document.createElement('style');document.head.appendChild(sdaCss)}
-    sdaCss.textContent=css;
-    NUM_ELS().forEach(e=>{e.style.animation=''});
+    if(sdaCss.textContent!==css)sdaCss.textContent=css;
   }else frame();
 }
 function frame(){
   if(SDA||!geo||sheets.length)return;
-  const y=scrollY,D=Math.max(1,geo.c0-geo.pc),p=Math.min(1,Math.max(0,y/D)),pin=Math.max(0,y-D),s=1+(geo.endS-1)*p;
-  $('left').style.transform='translate3d('+(geo.dx*p)+'px,'+pin+'px,0) scale('+s+')';
+  const y=scrollY,D=Math.max(1,geo.c0-geo.pc),p=Math.min(1,Math.max(0,y/D)),pin=Math.max(0,y-D),s=1+(geo.endS-1)*p,docked=y>D;
+  const L=$('left');L.style.transform='translate3d('+(geo.dx*p)+'px,'+pin+'px,0) scale('+s+')';L.style.opacity=docked?'0':'';$('dock').style.opacity=docked?'1':'';
   const f=String(Math.max(0,1-p*2.2));$('heroLbl').style.opacity=f;$('heroSub').style.opacity=f;
   $('top').style.setProperty('--p',Math.max(0,(p-.55)/.45).toFixed(3));
 }
 /* while a sheet locks the page, freeze the header exactly where it is */
 function freezeHeader(on){
   if(!SDA)return;
-  const L=$('left'),T=$('top'),a=$('heroLbl'),b=$('heroSub');
-  if(on){const tr=getComputedStyle(L).transform,op=getComputedStyle(a).opacity,pp=getComputedStyle(T).getPropertyValue('--p');
-    NUM_ELS().forEach(e=>e.style.animation='none');L.style.transform=tr;a.style.opacity=op;b.style.opacity=op;T.style.setProperty('--p',pp)}
-  else{L.style.transform='';a.style.opacity='';b.style.opacity='';T.style.removeProperty('--p');NUM_ELS().forEach(e=>e.style.animation='')}
+  const L=$('left'),T=$('top'),a=$('heroLbl'),b=$('heroSub'),d=$('dock');
+  if(on){const lc=getComputedStyle(L),tr=lc.transform,lo=lc.opacity,op=getComputedStyle(a).opacity,dop=getComputedStyle(d).opacity,pp=getComputedStyle(T).getPropertyValue('--p');
+    NUM_ELS().forEach(e=>e.style.animation='none');L.style.transform=tr;L.style.opacity=lo;d.style.opacity=dop;a.style.opacity=op;b.style.opacity=op;T.style.setProperty('--p',pp)}
+  else{L.style.transform='';L.style.opacity='';d.style.opacity='';a.style.opacity='';b.style.opacity='';T.style.removeProperty('--p');NUM_ELS().forEach(e=>e.style.animation='')}
 }
 addEventListener('scroll',()=>{if(SDA)return;if(!tick){tick=true;requestAnimationFrame(()=>{tick=false;frame()})}},{passive:true});
-addEventListener('resize',()=>measure());
+let rzT=0;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(()=>{if(!sheets.length)render();measure()},150)});
 
 /* tap a projection bubble to see how the number is made */
 let tipI=-1;
@@ -618,7 +639,6 @@ document.addEventListener('click',e=>{if(tipI>=0&&!e.target.closest('#proj'))clo
 document.addEventListener('scroll',()=>{if(tipI>=0)closeTip()},{passive:true});
 
 /* ---------- coin flip between budget and savings jar ---------- */
-let flipping=false;
 async function flip(){
   if(flipping)return;flipping=true;
   if(scrollY>0)scrollTo(0,0);frame();
@@ -784,7 +804,7 @@ function readSet(){
 function calc(){
   const s=readSet(),fx=s.fixed.reduce((a,f)=>a+f.amt,0),av=s.inc-fx-s.sav,c=s.cur;
   const m=n=>(n<0?'-':'')+c+Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-  $('calc').innerHTML='<div><span>Income</span><b>'+esc(m(s.inc))+'</b></div><div><span>Fixed costs</span><b>-'+esc(m(fx))+'</b></div><div><span>Savings</span><b>-'+esc(m(s.sav))+'</b></div><div style="margin-top:6px"><span><b>Spendable per month</b></span><b>'+esc(m(av))+'</b></div><div><span>About per day</span><b>'+esc(m(av/30.4))+'</b></div>';
+  $('calc').innerHTML='<div><span>Income</span><b>'+esc(m(s.inc))+'</b></div><div><span>Fixed costs</span><b>-'+esc(m(fx))+'</b></div><div><span>Savings</span><b>-'+esc(m(s.sav))+'</b></div><div style="margin-top:6px"><span><b>Spendable per month</b></span><b>'+esc(m(av))+'</b></div><div><span>About per day</span><b>'+esc(m(av/compute().P.days))+'</b></div>';
 }
 function openSet(){
   const s=ST();
@@ -885,19 +905,20 @@ async function sync(){
         body:JSON.stringify({data:S.settings,updated_at:new Date(u).toISOString()})});
       if(S.setUpd===u)S.setDirty=false;
     }
-    const map=new Map(S.tx.map(x=>[x.id,x]));
+    let changed=false;const map=new Map(S.tx.map(x=>[x.id,x]));
     for(let from=0;;from+=1000){
       const rows=await rest('transactions?select=id,date,type,amount,category,note,spread,deleted,updated_at&order=id',{headers:{Range:from+'-'+(from+999)}});
       rows.forEach(r=>{
         const ru=Date.parse(r.updated_at),l=map.get(r.id),v={upd:ru,date:r.date,type:r.type,amt:num(r.amount),cat:r.category,note:r.note||'',spread:r.spread||1,deleted:!!r.deleted};
-        if(!l){const n={id:r.id,ts:ru,...v};S.tx.push(n);map.set(r.id,n)}
-        else if(!l.dirty&&ru>l.upd)Object.assign(l,v);
+        if(!l){const n={id:r.id,ts:ru,...v};S.tx.push(n);map.set(r.id,n);changed=true}
+        else if(!l.dirty&&ru>l.upd){Object.assign(l,v);changed=true}
       });
       if(rows.length<1000)break;
     }
     const st=await rest('settings?select=data,updated_at');
-    if(st&&st[0]){const ru=Date.parse(st[0].updated_at);if(!S.setDirty&&(!S.setUpd||ru>S.setUpd)){S.settings=st[0].data;S.setUpd=ru}}
-    S.lastSync=Date.now();save();render();
+    if(st&&st[0]){const ru=Date.parse(st[0].updated_at);if(!S.setDirty&&(!S.setUpd||ru>S.setUpd)){if(JSON.stringify(S.settings)!==JSON.stringify(st[0].data))changed=true;S.settings=st[0].data;S.setUpd=ru}}
+    /* only rebuild the screen when the cloud actually brought something new */
+    S.lastSync=Date.now();save();if(changed)render();
   }catch(e){syncErr=e.message||'failed';save()}
   busy=false;syncLine();
   if(again){again=false;sync()}
