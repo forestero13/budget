@@ -47,10 +47,10 @@ main{max-width:560px;margin:0 auto;padding:0 14px}
 .hero .big{position:relative;z-index:5;will-change:transform;transform-origin:50% 50%;font-size:clamp(46px,15vw,64px);font-weight:800;color:var(--teal);letter-spacing:-.02em;line-height:1.05;white-space:nowrap;font-variant-numeric:tabular-nums}
 .hero.over small,.hero.over .big{color:var(--bad)}
 .hero .sub{color:var(--mute);font-size:14px;margin-top:4px}
-.proj{position:relative;height:min(40vh,300px);flex:none;margin:0 -14px 14px;background:linear-gradient(transparent,rgba(var(--acc),.08))}
-.pscroll{position:absolute;inset:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+.proj{position:relative;height:min(50vh,420px);flex:none;margin:0 -14px 14px;background:linear-gradient(transparent,rgba(var(--acc),.08))}
+.pscroll{position:absolute;inset:0;overflow-x:auto;overflow-y:hidden;overflow-y:clip;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
 .pscroll::-webkit-scrollbar{display:none}
-.ptrack{position:relative;height:100%}.ptrack svg{position:absolute;left:0;top:0}
+.ptrack{position:relative;transition:transform .35s cubic-bezier(.2,.8,.3,1);will-change:transform}.ptrack svg{position:absolute;left:0;top:0}
 .phint{position:absolute;left:16px;bottom:6px;font-size:12px;color:var(--mute);pointer-events:none}
 .proj svg{position:absolute;inset:0;width:100%;height:100%}
 .pt{position:absolute;transform:translate(-50%,-50%);border:2px solid var(--teal);background:var(--bg);border-radius:14px;padding:3px 10px;text-align:center;font-size:12px;color:var(--mute);line-height:1.2;white-space:nowrap}
@@ -247,7 +247,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <div class="acts"><button class="btn" id="expBtn">Export CSV</button><button class="btn" id="impBtn">Import CSV</button></div>
   <input type="file" id="impFile" accept=".csv,text/csv" hidden>
   <p class="hint" id="dataMsg"></p>
-  <p class="hint" style="text-align:center;margin-top:24px">Version 3.0 · Nov 26, 2026</p>
+  <p class="hint" style="text-align:center;margin-top:24px">Version 3.1 · Nov 26, 2026</p>
 </div></div>
 
 <div class="sheet" id="cfSheet"><div class="panel">
@@ -515,18 +515,27 @@ function renderHero(){
   const back=neg?C.proj.find(p=>p.v>=0):null;
   if(neg){$('heroSub').textContent=back?'Spend nothing and you\u2019re back above '+money(0)+' '+(back===C.proj[1]?'tomorrow':'on '+fmtD(back.d,{weekday:'short',month:'short',day:'numeric'})):'Spending nothing won\u2019t get you above '+money(0)+' before '+fmtD(addD(C.P.end,1),{month:'short',day:'numeric'})}
   else $('heroSub').textContent=(C.debt?'Paying back '+money(C.debt)+' overspent last month · ':'Spent today '+money(C.spentToday)+' · ')+money(C.periodLeft)+' left until '+fmtD(C.P.end,{month:'short',day:'numeric'});
-  const pr=C.proj,H=$('proj').clientHeight||260,GAP=118,X0=Math.round(Math.min(innerWidth,560)*.16);
-  const vs=pr.map(p=>p.v),mn=Math.min(...vs,neg?0:Infinity),mx=Math.max(...vs,neg?0:-Infinity),Y=v=>mx===mn?H*.55:H*(.8-(v-mn)/(mx-mn)*.58);
-  const W=X0+(pr.length)*GAP+40,xs=pr.map((_,i)=>X0+i*GAP),ys=vs.map(Y);
+  const pr=C.proj,H=$('proj').clientHeight||300,GAP=118,X0=Math.round(Math.min(innerWidth,560)*.16);
+  /* zoomed scale: about 4 days fill the height; the view follows the line as you swipe */
+  const vs=pr.map(p=>p.v),hi=Math.max(...vs,neg?0:-Infinity),lo=Math.min(...vs,neg?0:Infinity);
+  const w4=vs.slice(0,4),r4=Math.max(...w4)-Math.min(...w4),k=r4>0.01?H*.5/r4:(hi>lo?H*.6/(hi-lo):1);
+  const TOP=H*.22,Y=v=>TOP+(hi-v)*k,TH=Math.max(H,(hi-lo)*k+H*.45);
+  const W=X0+pr.length*GAP+40,xs=pr.map((_,i)=>X0+i*GAP),ys=vs.map(Y);
   const pts=xs.map((x,i)=>x+','+ys[i].toFixed(1));
   if(pr.length>1){const sl=(ys[1]-ys[0])/GAP,sl2=(ys[ys.length-1]-ys[ys.length-2])/GAP;pts.unshift('0,'+(ys[0]-sl*X0).toFixed(1));pts.push(W+','+(ys[ys.length-1]+sl2*(W-xs[xs.length-1])).toFixed(1))}
-  const zero=neg&&mx>0?'<line x1="0" x2="'+W+'" y1="'+Y(0).toFixed(1)+'" y2="'+Y(0).toFixed(1)+'" stroke="#5b6270" stroke-dasharray="4 6"/>':'';
-  const nm=fmtD(addD(C.P.end,1),{month:'short',day:'numeric'});
-  $('proj').innerHTML='<div class="pscroll" id="pscroll"><div class="ptrack" style="width:'+W+'px">'+
-    '<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+zero+'<polyline points="'+pts.join(' ')+'" fill="none" stroke="#f2f4f7" stroke-width="2" stroke-linejoin="round"/></svg>'+
+  const zero=neg&&hi>0?'<line x1="0" x2="'+W+'" y1="'+Y(0).toFixed(1)+'" y2="'+Y(0).toFixed(1)+'" stroke="#5b6270" stroke-dasharray="4 6"/><text x="8" y="'+(Y(0)-6).toFixed(1)+'" fill="#8b93a0" font-size="11">'+esc(money(0))+'</text>':'';
+  const nm=fmtD(addD(C.P.end,1),{month:'short',day:'numeric'}),ly=ys[ys.length-1];
+  $('proj').innerHTML='<div class="pscroll" id="pscroll"><div class="ptrack" id="ptrack" style="width:'+W+'px;height:'+TH.toFixed(0)+'px">'+
+    '<svg width="'+W+'" height="'+TH.toFixed(0)+'" viewBox="0 0 '+W+' '+TH.toFixed(0)+'">'+zero+'<polyline points="'+pts.join(' ')+'" fill="none" stroke="#f2f4f7" stroke-width="2" stroke-linejoin="round"/></svg>'+
     pr.map((p,i)=>'<button class="pt'+(p.v<0?' neg':'')+'" data-pi="'+i+'" style="left:'+xs[i]+'px;top:'+ys[i].toFixed(1)+'px">'+(i?esc(i<7?fmtD(p.d,{weekday:'short'}):fmtD(p.d,{weekday:'short'})+' '+p.d.getDate()):'Today')+'<b>'+esc(money(p.v))+'</b></button>').join('')+
-    '<div class="pt" style="left:'+(X0+pr.length*GAP-20)+'px;top:'+Math.round(H*.2)+'px;border-color:var(--line)">New month<b>'+esc(nm)+'</b></div>'+
+    '<div class="pt" style="left:'+(X0+pr.length*GAP-20)+'px;top:'+Math.max(30,ly-70).toFixed(0)+'px;border-color:var(--line)">New month<b>'+esc(nm)+'</b></div>'+
     '</div></div>'+(pr.length>3?'<div class="phint">Swipe to see each day if you spend nothing \u2192</div>':'');
+  const sc=$('pscroll'),tr=$('ptrack');let raf=0;
+  const cam=jump=>{const i0=Math.max(0,Math.floor((sc.scrollLeft+X0-GAP/2)/GAP)),win=ys.slice(i0,i0+4);if(!win.length)return;
+    const mid=(Math.min(...win)+Math.max(...win))/2,off=Math.max(0,Math.min(TH-H,mid-H*.55));
+    if(jump)tr.style.transition='none';tr.style.transform='translate3d(0,'+(-off).toFixed(1)+'px,0)';if(jump){void tr.offsetWidth;tr.style.transition=''}};
+  cam(true);
+  sc.addEventListener('scroll',()=>{if(!raf)raf=requestAnimationFrame(()=>{raf=0;cam(false)})},{passive:true});
   $('pscroll').addEventListener('scroll',()=>{if(tipI>=0)closeTip()},{passive:true});
 }
 function render(){
@@ -588,7 +597,7 @@ function closeTip(){
 }
 function openTip(i,btn){
   closeTip();const p=C.proj[i];if(!p)return;tipI=i;
-  const box=btn.parentElement,W=box.clientWidth,x=Math.max(66,Math.min(W-66,btn.offsetLeft)),y=Math.max(80,Math.min(box.clientHeight-70,btn.offsetTop));
+  const box=btn.parentElement,W=box.clientWidth,x=Math.max(66,Math.min(W-66,btn.offsetLeft)),y=btn.offsetTop;
   const row=(l,v)=>'<small>'+l+'</small><b>'+esc(v)+'</b>';
   const t=document.createElement('div');t.className='tip';t.style.left=x+'px';t.style.top=y+'px';
   t.innerHTML='<span class="bd">'+(i?esc(fmtD(p.d,{weekday:'short'})):'Today')+'</span>'+row('Rollover',money(p.r))+row('Daily budget','+'+money(p.a))+(p.pay?row('Payback','-'+money(p.pay)):'')+
