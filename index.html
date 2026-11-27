@@ -98,6 +98,7 @@ button.pt{font:inherit;font-size:12px;color:var(--mute);transition:opacity .12s}
 .heat i.l1{background:#115e59}.heat i.l2{background:#0d9488}.heat i.l3{background:var(--teal)}.heat i.fut{background:none}
 .sp{padding:8px 0;border-bottom:1px solid var(--line)}.sp:last-child{border-bottom:0}
 .sp .lr{padding:2px 0}.track{height:8px;background:var(--card2);border-radius:6px;overflow:hidden;margin-top:6px}.track i{display:block;height:100%;background:var(--exp)}
+.hab b{display:block;font-size:15px}.hab p{margin:2px 0 12px;color:var(--mute);font-size:14px;line-height:1.4}.hab:last-child p{margin-bottom:0}
 .empty{color:var(--mute);text-align:center;padding:14px 4px;font-size:15px}
 .cust{display:block;margin:6px auto 16px;border:0;background:var(--card2);color:#818cf8;font:inherit;font-weight:700;border-radius:999px;min-height:44px;padding:0 22px}
 .fab{position:fixed;right:18px;bottom:calc(20px + env(safe-area-inset-bottom));width:60px;height:60px;border-radius:50%;border:1px solid var(--line);background:var(--card2);color:var(--ink);font-size:32px;line-height:1;box-shadow:0 6px 24px rgba(0,0,0,.5);z-index:3}
@@ -174,8 +175,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <input id="txAmt" class="amtin" inputmode="decimal" placeholder="0.00" autocomplete="off"><p class="err"></p>
   <label id="catLbl">Category</label><div class="chips" id="txCats"></div>
   <div id="spWrap"><label for="txSpread">Spread over</label>
-    <select id="txSpread"><option value="1">Just this day</option><option value="7">1 week</option><option value="14">2 weeks</option><option value="30">1 month</option><option value="90">3 months</option><option value="180">6 months</option><option value="365">1 year</option></select>
-    <p class="hint">For big purchases: the cost is split evenly across days instead of hitting one day.</p></div>
+    <select id="txSpread"></select>
+    <p class="hint" id="spHint"></p></div>
   <label for="txNote">Note (optional)</label><input id="txNote" autocomplete="off">
   <label for="txDate">Date</label><input id="txDate" type="date">
   <div class="acts"><button class="btn del" id="txDel" hidden>Delete</button><button class="btn" id="txCancel">Cancel</button><button class="btn pri" id="txSave">Save</button></div>
@@ -237,7 +238,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <div class="acts"><button class="btn" id="expBtn">Export CSV</button><button class="btn" id="impBtn">Import CSV</button></div>
   <input type="file" id="impFile" accept=".csv,text/csv" hidden>
   <p class="hint" id="dataMsg"></p>
-  <p class="hint" style="text-align:center;margin-top:24px">Version 2.5 · Nov 26, 2026</p>
+  <p class="hint" style="text-align:center;margin-top:24px">Version 2.6 · Nov 26, 2026</p>
 </div></div>
 
 <div class="sheet" id="cfSheet"><div class="panel">
@@ -251,7 +252,7 @@ const KEY='dailyBudget.v1';
 const CATS=['Food','Groceries','Transport','Home','Fun','Shopping','Health','Bills','Other'];
 const INC_CATS=['Salary','Side income','Gift','Refund','Other'];
 const PAL=['#6366f1','#22c55e','#f59e0b','#06b6d4','#ec4899','#a855f7','#ef4444','#84cc16','#64748b','#f97316','#14b8a6'];
-const CARDS=[['daily','Daily log'],['recent','Recent activity'],['fixed','Fixed costs'],['goals','Savings goals'],['where','Where does it all go?'],['summary','Summary'],['spread','Spread-out expenses'],['checkin','Check-in'],['expTime','Expenses over time'],['incSrc','Income sources'],['incTime','Income over time']];
+const CARDS=[['daily','Daily log'],['habits','Habits & tips'],['recent','Recent activity'],['fixed','Fixed costs'],['goals','Savings goals'],['where','Where does it all go?'],['summary','Summary'],['spread','Spread-out expenses'],['checkin','Check-in'],['expTime','Expenses over time'],['incSrc','Income sources'],['incTime','Income over time']];
 let S;
 try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){}
 if(!S)S={settings:null,tx:[]};
@@ -298,7 +299,7 @@ function planIn(s,e){if(!C||!C.sv)return 0;const lo=s>C.ts?s:C.ts,hi=e<C.t?e:C.t
 const rollIn=(s,e)=>C?C.rolls.reduce((t,r)=>t+(r.date>=s&&r.date<=e?r.amt:0),0):0;
 const jarNet=(s,e)=>rollIn(s,e)+live().reduce((t,x)=>t+(x.date>=s&&x.date<=e?(x.type==='sav'?x.amt:x.type==='inc'&&x.cat==='__jar'?-x.amt:0):0),0)+planIn(s,e);
 const isSaving=x=>x.type==='sav'||(x.type==='inc'&&x.cat==='__jar');
-const incExtra=(s,e)=>live().reduce((t,x)=>t+(x.type==='inc'&&x.cat!=='__jar'&&x.date>=s&&x.date<=e?x.amt:0),0);
+const incExtra=(s,e)=>live().reduce((t,x)=>t+(x.type==='inc'&&x.cat!=='__jar'?portion(x,s,e):0),0);
 let mode='budget',scope='m';
 const fmtD=(d,o)=>d.toLocaleDateString(undefined,o);
 
@@ -314,7 +315,7 @@ function portion(x,s,e){
   return hi>=lo?x.amt/n*(dayDiff(new Date(lo),new Date(hi))+1):0;
 }
 const expIn=(s,e)=>live().reduce((t,x)=>t+(x.type==='exp'?portion(x,s,e):0),0);
-const typeIn=(k,s,e)=>live().reduce((t,x)=>t+(x.type===k&&x.date>=s&&x.date<=e?x.amt:0),0);
+const typeIn=(k,s,e)=>live().reduce((t,x)=>t+(x.type===k?portion(x,s,e):0),0);
 const outIn=(s,e)=>expIn(s,e)+typeIn('sav',s,e);
 
 function compute(){
@@ -367,6 +368,26 @@ function barCard(title,vals,col,foot){
   return '<div class="card">'+head(title)+'<div class="bars">'+vals.map(v=>'<div><em>'+(v.v?esc(short(v.v)):'')+'</em><i style="height:'+(v.v/mx*100)+'%;background:'+col+'"></i>'+esc(v.l)+'</div>').join('')+'</div>'+(foot?'<p class="hint">'+esc(foot)+'</p>':'')+'</div>';
 }
 cardMap={
+  habits(){
+    const out=[],t=C.today,last=n=>[...Array(n)].map((_,i)=>iso(addD(t,-i-1))),pct=v=>Math.round(v*100)+'%';
+    const first=live().reduce((m,x)=>x.date<m?x.date:m,C.t),known=dayDiff(parse(first),t),el=dayDiff(C.P.start,t);
+    if(el>=7&&C.ts<=C.P.s){const a=expIn(C.P.s,iso(addD(C.P.start,2)))/3,b=expIn(iso(addD(C.P.start,3)),iso(addD(t,-1)))/(el-3);
+      if(a>b*1.25&&a-b>5)out.push([a/Math.max(b,1),'Payday splurge','You spent '+(b>0?pct(a/b-1)+' more per day':money(a)+' a day')+' in the 3 days after payday. Paydays tend to feel like a license to spend; save big buys for later in the month.'])}
+    if(known>=14){let we=0,wn=0,wd=0,wdn=0;last(28).filter(k=>k>=first).forEach(k=>{const v=expIn(k,k),g=parse(k).getDay();if(g===0||g===6){we+=v;wn++}else{wd+=v;wdn++}});
+      if(wn&&wdn){const A=we/wn,B=wd/wdn;if(A>B*1.4&&A-B>5)out.push([A/Math.max(B,1),'Weekends cost more','You spend '+money(A)+' a day on weekends vs '+money(B)+' on weekdays. Decide on one weekend treat ahead of time instead of in the moment.'])}}
+    const s30=iso(addD(t,-30)),small=live().filter(x=>x.type==='exp'&&x.spread<=1&&x.amt<10&&x.date>=s30&&x.date<=C.t);
+    if(small.length>=8){const tot=small.reduce((a,x)=>a+x.amt,0);out.push([1+tot/200,'Small buys add up',small.length+' purchases under '+cur()+'10 in the last 30 days came to '+money(tot)+'. Each one feels like nothing; together they are a bill.'])}
+    if(el>=5&&known>=el+7){const pp=periodFor(addD(C.P.start,-1)),ce=iso(addD(t,-1)),pe=iso(addD(pp.start,el-1)),c={},p={};
+      live().forEach(x=>{if(x.type==='exp'){const a=portion(x,C.P.s,ce),b=portion(x,pp.s,pe);if(a)c[x.cat]=(c[x.cat]||0)+a;if(b)p[x.cat]=(p[x.cat]||0)+b}});
+      let best=null;Object.keys(c).forEach(k=>{const pv=p[k]||0,r=c[k]/Math.max(pv,1);if(c[k]>20&&c[k]>pv*1.3&&(!best||r>best[1]))best=[k,r]});
+      if(best)out.push([best[1],best[0]+' is up',best[0]+': '+money(c[best[0]])+' so far this month vs '+money(p[best[0]]||0)+' by this point last month.'])}
+    const d14=last(14).filter(k=>k>=C.ts);let ob=0;d14.forEach(k=>{if(outIn(k,k)>C.allow)ob++});
+    if(d14.length>=5&&ob/d14.length>=.5)out.push([1+ob/d14.length,'Over budget most days',ob+' of the last '+d14.length+' days went over your daily budget. One planned no-spend day a week resets the pattern.'])
+    const tracked=new Set(live().map(x=>x.date)),win=last(14).filter(k=>k>=first),lg=win.filter(k=>tracked.has(k)).length;
+    if(win.length>=5&&lg/win.length<.6)out.push([1.5,'Log every day','You logged on '+lg+' of the last '+win.length+' days. The benefit of tracking comes from the awareness it builds, and that needs consistency.'])
+    if(out.length<2)out.push([0,'Make card spending feel real','Paying by card feels cheaper than cash: in one study people bid over twice as much with a card. Logging each purchase right away brings some of that sting back.'])
+    return '<div class="card">'+head('Habits & tips')+out.sort((a,b)=>b[0]-a[0]).slice(0,3).map(([_,h,b])=>'<div class="hab"><b>'+esc(h)+'</b><p>'+esc(b)+'</p></div>').join('')+'</div>';
+  },
   daily(){
     const sd=selDay||C.t,d=parse(sd),ws=addD(d,-d.getDay()),days=C.P.days;
     const wk=[...Array(7)].map((_,i)=>{const x=addD(ws,i),k=iso(x);return '<button data-day="'+k+'" class="'+(k===sd?'on ':'')+(k===C.t?'td':'')+'"><small>'+fmtD(x,{weekday:'short'}).slice(0,2)+'</small><i>'+x.getDate()+'</i></button>'}).join('');
@@ -426,7 +447,7 @@ cardMap={
   expTime(){return barCard('Expenses over time',periodsBack(6).map(p=>({l:fmtD(p.start,{month:'short'}),v:expIn(p.s,p.e)})),'var(--exp)','By budget month, spread-out costs counted on the days they cover.')},
   incSrc(){
     const P=C.P,by={};if(C.inc)by['Salary']=C.inc;
-    live().forEach(x=>{if(x.type==='inc'&&x.cat!=='__jar'&&x.date>=P.s&&x.date<=P.e)by[x.cat]=(by[x.cat]||0)+x.amt});
+    live().forEach(x=>{if(x.type==='inc'&&x.cat!=='__jar'){const v=portion(x,P.s,P.e);if(v)by[x.cat]=(by[x.cat]||0)+v}});
     const items=Object.entries(by).sort((a,b)=>b[1]-a[1]).map(([k,v],i)=>({k,v,c:['#22c55e','#16a34a','#4ade80','#15803d','#86efac'][i%5]}));
     return '<div class="card">'+head('Income sources')+(items.length?donut(items,'this month'):'<p class="empty">Set your monthly income in Settings.</p>')+'</div>';
   },
@@ -567,6 +588,14 @@ $('feed').onclick=e=>{
 
 /* ---------- entry sheet ---------- */
 let edit=null,kind='exp',cat=CATS[0];
+let spKind=null;
+function spOpts(val){
+  const d=$('txDate').value||compute().t,rest=dayDiff(parse(d),periodFor(parse(d)).end)+1;
+  const o=kind==='inc'?[[rest,'Rest of the budget month ('+rest+' day'+(rest>1?'s':'')+')'],[1,'Just this day']]:[[1,'Just this day'],[7,'1 week'],[14,'2 weeks'],[30,'1 month'],[90,'3 months'],[180,'6 months'],[365,'1 year']];
+  if(val==null)val=o[0][0];if(!o.some(x=>x[0]==val))o.push([val,val+' days']);
+  $('txSpread').innerHTML=o.map(([v,l])=>'<option value="'+v+'">'+esc(l)+'</option>').join('');$('txSpread').value=String(val);
+  $('spHint').textContent=kind==='inc'?'Extra money is added a little each day, so it doesn\u2019t all feel spendable at once.':'For big purchases: the cost is split evenly across days instead of hitting one day.';
+}
 function chips(){
   const gl=goals();
   const list=kind==='exp'?CATS.map(c=>[c,c]):kind==='inc'?INC_CATS.map(c=>[c,c]):gl.map(g=>[g.id,g.name]);
@@ -574,27 +603,28 @@ function chips(){
   $('catLbl').textContent=kind==='sav'?'Goal':'Category';
   $('txCats').innerHTML=list.length?list.map(([v,l])=>'<button type="button" class="'+(v===cat?'on':'')+'" data-c="'+esc(v)+'">'+esc(l)+'</button>').join(''):'<p class="hint">No goals yet. Create one in the Savings goals card.</p>';
   document.querySelectorAll('#seg button').forEach(b=>b.classList.toggle('pri',b.dataset.k===kind));
-  $('spWrap').hidden=kind!=='exp';
+  $('spWrap').hidden=kind==='sav';if(spKind!==kind){spKind=kind;spOpts(null)}
   $('txTitle').textContent=(edit?'Edit ':'New ')+({exp:'expense',inc:'income',sav:'saving'})[kind];
 }
 function openTx(x){
   if(x&&isJar(x))return openJar(x.type==='sav'?'in':'out',x);
   edit=x||null;kind=x?x.type:'exp';cat=x?x.cat:CATS[0];
   $('txAmt').value=x?x.amt.toFixed(2):'';$('txNote').value=x?x.note||'':'';
-  const sp=String(x?x.spread||1:1);if(![...$('txSpread').options].some(o=>o.value===sp))$('txSpread').add(new Option(sp+' days',sp));$('txSpread').value=sp;
-  $('txDate').value=x?x.date:compute().t;$('txDel').hidden=!x;chips();
+  spKind=null;
+  $('txDate').value=x?x.date:compute().t;$('txDel').hidden=!x;chips();if(x&&x.type!=='sav')spOpts(x.spread||1);
   openSheet('txSheet');setTimeout(()=>$('txAmt').focus(),50);
 }
 $('addBtn').onclick=()=>openTx();
 $('txCats').onclick=e=>{const b=e.target.closest('button');if(b){cat=b.dataset.c;chips()}};
 $('seg').onclick=e=>{const b=e.target.closest('button');if(b){kind=b.dataset.k;chips()}};
+$('txDate').addEventListener('change',()=>{if(kind==='inc'&&$('txSpread').selectedIndex===0)spOpts(null)});
 $('txCancel').onclick=()=>closeSheet('txSheet');
 function putTx(rec){S.tx=S.tx.filter(x=>x.id!==rec.id);S.tx.push(rec);save()}
 $('txSave').onclick=()=>{
   const amt=Math.round(num($('txAmt').value)*100)/100;
   if(amt<=0)return bad($('txAmt'),'Enter an amount above 0.');
   if(!cat)return bad($('txCats'),'Create a savings goal first.');
-  putTx({id:edit?edit.id:uid(),ts:edit?edit.ts:Date.now(),type:kind,amt,cat,note:$('txNote').value.trim(),date:$('txDate').value||compute().t,spread:kind==='exp'?+$('txSpread').value||1:1,upd:Date.now(),dirty:true});
+  putTx({id:edit?edit.id:uid(),ts:edit?edit.ts:Date.now(),type:kind,amt,cat,note:$('txNote').value.trim(),date:$('txDate').value||compute().t,spread:kind==='sav'?1:+$('txSpread').value||1,upd:Date.now(),dirty:true});
   closeSheet('txSheet');render();sync();
 };
 function delTx(x){x.deleted=true;x.upd=Date.now();x.dirty=true}
