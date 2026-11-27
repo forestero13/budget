@@ -214,6 +214,8 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <label>Fixed monthly costs (rent, bills, subscriptions)</label>
   <div id="fixed"></div>
   <button class="ib" id="addFixed" style="margin-top:8px">+ Add fixed cost</button>
+  <label for="debtMode">If I overspend a month</label><select id="debtMode"><option value="spread">Pay it back across next month</option><option value="once">Take it all from day 1 of next month</option></select>
+  <p class="hint">Money left over at the end of a month goes to your Savings jar automatically.</p>
   <label for="sav">Monthly savings goal</label><input id="sav" inputmode="decimal" placeholder="0.00">
   <label for="cur">Currency symbol</label><input id="cur" maxlength="4">
   <div class="calc" id="calc"></div>
@@ -235,7 +237,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <div class="acts"><button class="btn" id="expBtn">Export CSV</button><button class="btn" id="impBtn">Import CSV</button></div>
   <input type="file" id="impFile" accept=".csv,text/csv" hidden>
   <p class="hint" id="dataMsg"></p>
-  <p class="hint" style="text-align:center;margin-top:24px">Version 2.4 · Nov 26, 2026</p>
+  <p class="hint" style="text-align:center;margin-top:24px">Version 2.5 · Nov 26, 2026</p>
 </div></div>
 
 <div class="sheet" id="cfSheet"><div class="panel">
@@ -293,7 +295,8 @@ const goalName=id=>(goals().find(g=>g.id===id)||{}).name||'Savings';
 const isJar=x=>(x.type==='sav'&&x.cat==='jar')||(x.type==='inc'&&x.cat==='__jar');
 /* jar = every saving entry (jar + goal deposits) minus withdrawals, plus the monthly savings plan set aside so far */
 function planIn(s,e){if(!C||!C.sv)return 0;const lo=s>C.ts?s:C.ts,hi=e<C.t?e:C.t;return hi>=lo?C.sv/C.P.days*(dayDiff(parse(lo),parse(hi))+1):0}
-const jarNet=(s,e)=>live().reduce((t,x)=>t+(x.date>=s&&x.date<=e?(x.type==='sav'?x.amt:x.type==='inc'&&x.cat==='__jar'?-x.amt:0):0),0)+planIn(s,e);
+const rollIn=(s,e)=>C?C.rolls.reduce((t,r)=>t+(r.date>=s&&r.date<=e?r.amt:0),0):0;
+const jarNet=(s,e)=>rollIn(s,e)+live().reduce((t,x)=>t+(x.date>=s&&x.date<=e?(x.type==='sav'?x.amt:x.type==='inc'&&x.cat==='__jar'?-x.amt:0):0),0)+planIn(s,e);
 const isSaving=x=>x.type==='sav'||(x.type==='inc'&&x.cat==='__jar');
 const incExtra=(s,e)=>live().reduce((t,x)=>t+(x.type==='inc'&&x.cat!=='__jar'&&x.date>=s&&x.date<=e?x.amt:0),0);
 let mode='budget',scope='m';
@@ -318,16 +321,26 @@ function compute(){
   const now=new Date(),today=new Date(now.getFullYear(),now.getMonth(),now.getDate()),t=iso(today);
   const st=ST(),P=periodFor(today);
   const inc=num(st.inc),fx=(st.fixed||[]).reduce((a,f)=>a+num(f.amt),0),sv=num(st.sav);
-  const allow=(inc-fx-sv)/P.days;
-  const ts=(st.track&&st.track>P.s&&st.track<=t)?st.track:P.s;
-  const yest=iso(addD(today,-1));
-  const budget=allow*(dayDiff(parse(ts),today)+1)+typeIn('inc',ts,t)-(t>ts?outIn(ts,yest):0);
+  const base=(inc-fx-sv)/P.days;
+  /* counting starts at the 'start counting from' date, or the first entry ever logged */
+  let G=st.track||live().reduce((m,x)=>x.date<m?x.date:m,t);if(G>t)G=t;
+  const ts=G>P.s?G:P.s,yest=iso(addD(today,-1));
+  /* walk earlier budget months: leftovers go to the jar, overspending carries forward */
+  let debt=0;const rolls=[];
+  if(G<P.s){let p=periodFor(parse(G)),guard=0;
+    while(p.s<P.s&&guard++<240){
+      const s0=G>p.s?G:p.s,n=dayDiff(parse(s0),p.end)+1,E=(inc-fx-sv)/p.days*n+typeIn('inc',s0,p.e)-outIn(s0,p.e)-debt,plan=sv/p.days*n;
+      if(E>=0){debt=0;if(E+plan>0)rolls.push({date:p.e,amt:E+plan,from:p.start})}else{debt=-E;if(plan>0)rolls.push({date:p.e,amt:plan,from:p.start})}
+      p=periodFor(addD(p.end,1));
+    }}
+  const once=st.debt==='once',nDays=dayDiff(parse(ts),P.end)+1,pay=once?0:debt/nDays,allow=base-pay;
+  const budget=allow*(dayDiff(parse(ts),today)+1)+typeIn('inc',ts,t)-(t>ts?outIn(ts,yest):0)-(once?debt:0);
   const spentToday=outIn(t,t),left=budget-spentToday;
-  const inc0=typeIn('inc',t,t),proj=[{d:today,v:left,r:budget-allow-inc0,a:allow,inc:inc0,out:spentToday}];
-  for(let i=1;i<=2;i++){const d=addD(today,i),k=iso(d);if(k>P.e)break;const r=proj[i-1].v,ic=typeIn('inc',k,k),o=outIn(k,k);proj.push({d,v:r+allow+ic-o,r,a:allow,inc:ic,out:o})}
+  const inc0=typeIn('inc',t,t),proj=[{d:today,v:left,r:budget-allow-inc0,a:base,pay,inc:inc0,out:spentToday}];
+  for(let i=1;i<=2;i++){const d=addD(today,i),k=iso(d);if(k>P.e)break;const r=proj[i-1].v,ic=typeIn('inc',k,k),o=outIn(k,k);proj.push({d,v:r+allow+ic-o,r,a:base,pay,inc:ic,out:o})}
   const tm=iso(addD(today,1));
   const periodLeft=left+(t<P.e?allow*dayDiff(today,P.end)+typeIn('inc',tm,P.e)-outIn(tm,P.e):0);
-  return{t,ts,today,P,inc,fx,sv,allow,budget,spentToday,left,proj,periodLeft};
+  return{t,ts,today,P,inc,fx,sv,base,allow,pay,debt,once,rolls,budget,spentToday,left,proj,periodLeft};
 }
 
 /* ---------- rendering ---------- */
@@ -341,12 +354,12 @@ function donut(items,center){
     items.map(i=>'<div><i style="background:'+i.c+'"></i><span>'+esc(i.k)+'</span><b>'+esc(money(i.v))+'</b></div>').join('')+'</div></div>';
 }
 const head=(t,act)=>'<h2><span>'+esc(t)+'</span>'+(act?'<button data-act="'+act+'" aria-label="Open">›</button>':'')+'</h2>';
-function actRow(x){
+function actRow(x,jv){
   const isI=x.type==='inc',isS=x.type==='sav';
   const label=x.cat==='jar'?'Savings jar':x.cat==='__jar'?'From savings jar':isS?'Saved · '+goalName(x.cat):x.cat;
   const col=isJar(x)?'#c026d3':isI?'var(--inc)':isS?'var(--goal)':'var(--exp)';
   const when=fmtD(parse(x.date),{month:'short',day:'numeric'})+(x.spread>1?' · over '+x.spread+' days':'');
-  return '<div class="act" data-id="'+esc(x.id)+'"><div class="ico" style="background:'+col+'">'+esc((isJar(x)?'J':label.replace('Saved · ','')).slice(0,1).toUpperCase())+'</div><div class="t"><div>'+esc(label)+'</div><small>'+esc(x.note||when)+'</small></div><div class="a'+(isI?' pos':'')+'">'+(isI?'+':'-')+esc(money(x.amt))+'<small>'+esc(x.note?when:'')+'</small></div></div>';
+  return '<div class="act" data-id="'+esc(x.id)+'"><div class="ico" style="background:'+col+'">'+esc((isJar(x)?'J':label.replace('Saved · ','')).slice(0,1).toUpperCase())+'</div><div class="t"><div>'+esc(label)+'</div><small>'+esc(x.note||when)+'</small></div><div class="a'+((jv?isS:isI)?' pos':'')+'">'+((jv?isS:isI)?'+':'-')+esc(money(x.amt))+'<small>'+esc(x.note?when:'')+'</small></div></div>';
 }
 function periodsBack(n){const out=[];for(let k=n-1;k>=0;k--){const P=C.P,d=new Date(P.start.getFullYear(),P.start.getMonth()-k,P.start.getDate());out.push(periodFor(d))}return out}
 function barCard(title,vals,col,foot){
@@ -358,12 +371,13 @@ cardMap={
     const sd=selDay||C.t,d=parse(sd),ws=addD(d,-d.getDay()),days=C.P.days;
     const wk=[...Array(7)].map((_,i)=>{const x=addD(ws,i),k=iso(x);return '<button data-day="'+k+'" class="'+(k===sd?'on ':'')+(k===C.t?'td':'')+'"><small>'+fmtD(x,{weekday:'short'}).slice(0,2)+'</small><i>'+x.getDate()+'</i></button>'}).join('');
     const P=periodFor(d),incS=C.inc/P.days,fxS=C.fx/P.days,svS=C.sv/P.days,ex=typeIn('inc',sd,sd),sp=expIn(sd,sd),gs=typeIn('sav',sd,sd);
-    const net=incS+ex-fxS-svS-sp-gs;
+    const pb=sd>=C.ts&&sd<=C.P.e?C.pay+(C.once&&sd===C.ts?C.debt:0):0,net=incS+ex-fxS-svS-sp-gs-pb;
     return '<div class="card">'+head('Daily log')+'<div class="week">'+wk+'</div>'+
       '<div class="lr"><span>Income share</span><span class="pos">'+esc(money(incS+ex))+'</span></div>'+
       '<div class="lr"><span>Fixed costs ('+(ST().fixed||[]).length+')</span><span>-'+esc(money(fxS))+'</span></div>'+
       (svS?'<div class="lr"><span>Savings plan</span><span>-'+esc(money(svS))+'</span></div>':'')+
       '<div class="lr"><span>Spent</span><span>-'+esc(money(sp))+'</span></div>'+
+      (pb?'<div class="lr"><span>Paying back overspending</span><span class="neg">-'+esc(money(pb))+'</span></div>':'')+
       (gs?'<div class="lr"><span>Added to goals</span><span>-'+esc(money(gs))+'</span></div>':'')+
       '<div class="lr tot"><span>Net for this day</span><span class="'+(net<0?'neg':'')+'">'+esc(money(net))+'</span></div></div>';
   },
@@ -388,10 +402,10 @@ cardMap={
     return '<div class="card">'+head('Where does it all go?')+(items.length?donut(items,'spent'):'<p class="empty">Log expenses to see your spending by category.</p>')+'</div>';
   },
   summary(){
-    const P=C.P,inc=C.inc+incExtra(P.s,P.e),exp=expIn(P.s,P.e),sav=C.sv+typeIn('sav',P.s,P.e)-live().reduce((t,x)=>t+(x.cat==='__jar'&&x.type==='inc'&&x.date>=P.s&&x.date<=P.e?x.amt:0),0),lo=inc-C.fx-exp-sav;
+    const P=C.P,inc=C.inc+incExtra(P.s,P.e),exp=expIn(P.s,P.e),sav=C.sv+typeIn('sav',P.s,P.e)-live().reduce((t,x)=>t+(x.cat==='__jar'&&x.type==='inc'&&x.date>=P.s&&x.date<=P.e?x.amt:0),0),lo=inc-C.fx-exp-sav-C.debt;
     return '<div class="card">'+head('Summary')+'<p class="hint" style="margin:-6px 0 6px">'+esc(fmtD(P.start,{month:'short',day:'numeric'})+' – '+fmtD(P.end,{month:'short',day:'numeric',year:'numeric'}))+'</p>'+
       '<div class="lr"><span>Incomes</span><span class="pos">'+esc(money(inc))+'</span></div><div class="lr"><span>Fixed costs</span><span>'+esc(money(C.fx))+'</span></div>'+
-      '<div class="lr"><span>Expenses</span><span>'+esc(money(exp))+'</span></div><div class="lr"><span>Savings</span><span>'+esc(money(sav))+'</span></div>'+
+      '<div class="lr"><span>Expenses</span><span>'+esc(money(exp))+'</span></div><div class="lr"><span>Savings</span><span>'+esc(money(sav))+'</span></div>'+(C.debt?'<div class="lr"><span>Overspent last month</span><span class="neg">'+esc(money(C.debt))+'</span></div>':'')+
       '<div class="lr tot"><span>Left-over</span><span class="'+(lo<0?'neg':'')+'">'+esc(money(lo))+'</span></div></div>';
   },
   spread(){
@@ -442,7 +456,7 @@ function renderHero(){
   $('hero').classList.toggle('over',neg);
   $('heroLbl').textContent=neg?'Over today’s budget':'Today’s Budget';
   $('left').textContent=money(C.left);
-  $('heroSub').textContent='Spent today '+money(C.spentToday)+' · '+money(C.periodLeft)+' left until '+fmtD(C.P.end,{month:'short',day:'numeric'});
+  $('heroSub').textContent=(C.debt?'Paying back '+money(C.debt)+' overspent last month · ':'Spent today '+money(C.spentToday)+' · ')+money(C.periodLeft)+' left until '+fmtD(C.P.end,{month:'short',day:'numeric'});
   const pr=C.proj,vs=pr.map(p=>p.v),mn=Math.min(...vs),mx=Math.max(...vs),xs=[14,50,86].slice(0,pr.length);
   const ys=vs.map(v=>mx===mn?55:78-(v-mn)/(mx-mn)*50);
   let line='';
@@ -454,8 +468,8 @@ function renderHero(){
 function render(){
   LIVE=null;tipI=-1;C=compute();renderHero();
   if(mode==='jar'){
-    const [a,b]=scopeRange(),tx=live().filter(x=>isSaving(x)&&x.date>=a&&x.date<=b).sort((p,q)=>q.date.localeCompare(p.date)||q.ts-p.ts).slice(0,20);
-    $('feed').innerHTML='<div class="card">'+head('Jar activity')+(tx.length?tx.map(actRow).join(''):'<p class="empty">No activity yet. Tap Add Money to set money aside.</p>')+'</div>'+cardMap.goals();
+    const [a,b]=scopeRange(),tx=live().filter(x=>isSaving(x)&&x.date>=a&&x.date<=b).concat(C.rolls.filter(r=>r.date>=a&&r.date<=b).map(r=>({id:'roll-'+r.date,ts:0,type:'sav',cat:'jar',amt:r.amt,note:'Left over from '+fmtD(r.from,{month:'long'}),date:r.date,spread:1}))).sort((p,q)=>q.date.localeCompare(p.date)||q.ts-p.ts).slice(0,20);
+    $('feed').innerHTML='<div class="card">'+head('Jar activity')+(tx.length?tx.map(x=>actRow(x,true)).join(''):'<p class="empty">No activity yet. Tap Add Money to set money aside.</p>')+'</div>'+cardMap.goals();
   }else $('feed').innerHTML=cardOrder().filter(c=>c.on).map(c=>cardMap[c.id]()).join('');
   syncLine();
 }
@@ -490,7 +504,7 @@ function openTip(i,btn){
   const W=$('proj').clientWidth,x=Math.max(66,Math.min(W-66,btn.offsetLeft)),y=btn.offsetTop;
   const row=(l,v)=>'<small>'+l+'</small><b>'+esc(v)+'</b>';
   const t=document.createElement('div');t.className='tip';t.style.left=x+'px';t.style.top=y+'px';
-  t.innerHTML='<span class="bd">'+(i?esc(fmtD(p.d,{weekday:'short'})):'Today')+'</span>'+row('Rollover',money(p.r))+row('Daily budget','+'+money(p.a))+
+  t.innerHTML='<span class="bd">'+(i?esc(fmtD(p.d,{weekday:'short'})):'Today')+'</span>'+row('Rollover',money(p.r))+row('Daily budget','+'+money(p.a))+(p.pay?row('Payback','-'+money(p.pay)):'')+
     (p.inc?row('Income','+'+money(p.inc)):'')+(p.out?row(i?'Scheduled':'Spent','-'+money(p.out)):'')+'<hr><b class="tot">'+esc(money(p.v))+'</b>';
   $('proj').appendChild(t);btn.classList.add('hid');
   t.animate([{transform:'translate(-50%,-50%) scale(.45)',opacity:.3},{transform:'translate(-50%,-50%) scale(1.05)',opacity:1,offset:.7},{transform:'translate(-50%,-50%) scale(1)',opacity:1}],{duration:260,easing:'cubic-bezier(.2,.9,.3,1)'});
@@ -548,7 +562,7 @@ $('feed').onclick=e=>{
   if(b.dataset.act==='hist')return openHist();
   if(b.dataset.act==='set')return openSet();
   if(b.dataset.goal)return openGoal(b.dataset.goal);
-  if(b.dataset.id)openTx(S.tx.find(x=>x.id===b.dataset.id));
+  if(b.dataset.id&&!b.dataset.id.startsWith('roll-'))openTx(S.tx.find(x=>x.id===b.dataset.id));
 };
 
 /* ---------- entry sheet ---------- */
@@ -654,7 +668,7 @@ function fixedRow(f){
   $('fixed').appendChild(d);
 }
 function readSet(){
-  return{...ST(),inc:num($('inc').value),sav:num($('sav').value),pay:+$('pay').value||1,cur:$('cur').value.trim()||'$',track:$('trk').value||'',
+  return{...ST(),inc:num($('inc').value),sav:num($('sav').value),pay:+$('pay').value||1,cur:$('cur').value.trim()||'$',track:$('trk').value||'',debt:$('debtMode').value,
     fixed:[...document.querySelectorAll('#fixed .fx')].map(d=>({name:d.querySelector('.fn').value.trim(),amt:num(d.querySelector('.fa').value)})).filter(f=>f.name||f.amt)};
 }
 function calc(){
@@ -664,7 +678,7 @@ function calc(){
 }
 function openSet(){
   const s=ST();
-  $('inc').value=s.inc||'';$('sav').value=s.sav||'';$('pay').value=s.pay||1;$('cur').value=s.cur||'$';$('trk').value=s.track||'';
+  $('inc').value=s.inc||'';$('sav').value=s.sav||'';$('pay').value=s.pay||1;$('cur').value=s.cur||'$';$('trk').value=s.track||'';$('debtMode').value=s.debt||'spread';
   $('fixed').innerHTML='';((s.fixed||[]).length?s.fixed:[{name:'Rent',amt:''}]).forEach(fixedRow);
   $('setCancel').hidden=!S.settings;$('dataMsg').textContent='';calc();cloudUI();openSheet('setSheet');
 }
