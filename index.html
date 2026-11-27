@@ -16,6 +16,7 @@
 *{box-sizing:border-box;min-width:0;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);transition:background-color .5s;color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;overflow-x:clip}
 body{padding-bottom:calc(110px + env(safe-area-inset-bottom))}
+@property --p{syntax:'<number>';inherits:true;initial-value:0}
 :root{--p:0;--bgr:11,13,16;--acc:45,212,191}
 body.jar{--bg:#110a16;--card:#1a141f;--card2:#251c2b;--line:#33283a;--bgr:17,10,22;--acc:192,38,211}
 .top{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:10px;padding:calc(8px + env(safe-area-inset-top)) 14px 8px;background:linear-gradient(rgba(var(--bgr),var(--p)) 75%,transparent)}
@@ -238,7 +239,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <div class="acts"><button class="btn" id="expBtn">Export CSV</button><button class="btn" id="impBtn">Import CSV</button></div>
   <input type="file" id="impFile" accept=".csv,text/csv" hidden>
   <p class="hint" id="dataMsg"></p>
-  <p class="hint" style="text-align:center;margin-top:24px">Version 2.6 · Nov 26, 2026</p>
+  <p class="hint" style="text-align:center;margin-top:24px">Version 2.7 · Nov 26, 2026</p>
 </div></div>
 
 <div class="sheet" id="cfSheet"><div class="panel">
@@ -261,7 +262,7 @@ let LIVE=null;
 const live=()=>LIVE||(LIVE=S.tx.filter(x=>!x.deleted));
 /* bottom sheets: stack order, background scroll lock, slide animation */
 let sheets=[],lockY=0;
-function lockBody(on){const b=document.body.style;if(on){lockY=scrollY;b.position='fixed';b.top=-lockY+'px';b.left='0';b.right='0'}else{b.position='';b.top='';b.left='';b.right='';scrollTo(0,lockY)}}
+function lockBody(on){const b=document.body.style;if(on){freezeHeader(true);lockY=scrollY;b.position='fixed';b.top=-lockY+'px';b.left='0';b.right='0'}else{b.position='';b.top='';b.left='';b.right='';scrollTo(0,lockY);freezeHeader(false)}}
 function openSheet(id){
   const el=document.getElementById(id);if(sheets.includes(id))return;
   if(!sheets.length)lockBody(true);
@@ -487,30 +488,53 @@ function renderHero(){
   if(pr.length===1)$('proj').querySelector('.pt').style.left='30%';
 }
 function render(){
-  LIVE=null;tipI=-1;C=compute();renderHero();
+  LIVE=null;tipI=-1;C=compute();if(geo)requestAnimationFrame(()=>measure());renderHero();
   if(mode==='jar'){
     const [a,b]=scopeRange(),tx=live().filter(x=>isSaving(x)&&x.date>=a&&x.date<=b).concat(C.rolls.filter(r=>r.date>=a&&r.date<=b).map(r=>({id:'roll-'+r.date,ts:0,type:'sav',cat:'jar',amt:r.amt,note:'Left over from '+fmtD(r.from,{month:'long'}),date:r.date,spread:1}))).sort((p,q)=>q.date.localeCompare(p.date)||q.ts-p.ts).slice(0,20);
     $('feed').innerHTML='<div class="card">'+head('Jar activity')+(tx.length?tx.map(x=>actRow(x,true)).join(''):'<p class="empty">No activity yet. Tap Add Money to set money aside.</p>')+'</div>'+cardMap.goals();
   }else $('feed').innerHTML=cardOrder().filter(c=>c.on).map(c=>cardMap[c.id]()).join('');
   syncLine();
 }
-/* number shrinks and slides into the top bar as you scroll */
-let geo=null,tick=false;
+/* number shrinks and slides into the top bar as you scroll.
+   Safari 26+: CSS scroll-driven animation, run by the compositor in the same frame as the scroll.
+   Older browsers: per-frame JS fallback. */
+const SDA=!!(window.CSS&&CSS.supports&&CSS.supports('animation-timeline: scroll()'));
+let geo=null,tick=false,sdaCss=null;
+const NUM_ELS=()=>[$('left'),$('heroLbl'),$('heroSub'),$('top')];
 function measure(){
   if(sheets.length)return;
-  const el=$('left');el.style.transform='none';
+  const el=$('left');
+  NUM_ELS().forEach(e=>{e.style.animation='none';e.style.transform='';e.style.opacity=''});
   const r=el.getBoundingClientRect(),pr=$('pill').getBoundingClientRect();
   geo={c0:r.top+scrollY+r.height/2,pc:pr.top+pr.height/2,dx:(pr.left+pr.width/2)-(r.left+r.width/2),endS:19/parseFloat(getComputedStyle(el).fontSize)};
-  frame();
+  if(SDA){
+    const D=Math.max(1,geo.c0-geo.pc),N=Math.max(1,document.documentElement.scrollHeight-innerHeight),f=n=>Math.min(100,n/N*100).toFixed(4)+'%';
+    const at=y=>{const p=Math.min(1,y/D);return 'translate3d('+(geo.dx*p).toFixed(2)+'px,'+Math.max(0,y-D).toFixed(2)+'px,0) scale('+(1+(geo.endS-1)*p).toFixed(4)+')'};
+    const css='@keyframes numDock{0%{transform:'+at(0)+'}'+(D<N?f(D)+'{transform:'+at(D)+'}':'')+'100%{transform:'+at(N)+'}}'+
+      '@keyframes lblFade{0%{opacity:1}'+(D/2.2<N?f(D/2.2)+'{opacity:0}':'')+'100%{opacity:'+Math.max(0,1-N/D*2.2)+'}}'+
+      '@keyframes barFade{0%{--p:0}'+(D*.55<N?f(D*.55)+'{--p:0}':'')+(D<N?f(D)+'{--p:1}':'')+'100%{--p:'+Math.min(1,Math.max(0,(N/D-.55)/.45))+'}}'+
+      '#left{animation:numDock linear both;animation-timeline:scroll(root)}#heroLbl,#heroSub{animation:lblFade linear both;animation-timeline:scroll(root)}#top{animation:barFade linear both;animation-timeline:scroll(root)}';
+    if(!sdaCss){sdaCss=document.createElement('style');document.head.appendChild(sdaCss)}
+    sdaCss.textContent=css;
+    NUM_ELS().forEach(e=>{e.style.animation=''});
+  }else frame();
 }
 function frame(){
-  if(!geo||sheets.length)return;
+  if(SDA||!geo||sheets.length)return;
   const y=scrollY,D=Math.max(1,geo.c0-geo.pc),p=Math.min(1,Math.max(0,y/D)),pin=Math.max(0,y-D),s=1+(geo.endS-1)*p;
   $('left').style.transform='translate3d('+(geo.dx*p)+'px,'+pin+'px,0) scale('+s+')';
   const f=String(Math.max(0,1-p*2.2));$('heroLbl').style.opacity=f;$('heroSub').style.opacity=f;
   $('top').style.setProperty('--p',Math.max(0,(p-.55)/.45).toFixed(3));
 }
-addEventListener('scroll',()=>{if(!tick){tick=true;requestAnimationFrame(()=>{tick=false;frame()})}},{passive:true});
+/* while a sheet locks the page, freeze the header exactly where it is */
+function freezeHeader(on){
+  if(!SDA)return;
+  const L=$('left'),T=$('top'),a=$('heroLbl'),b=$('heroSub');
+  if(on){const tr=getComputedStyle(L).transform,op=getComputedStyle(a).opacity,pp=getComputedStyle(T).getPropertyValue('--p');
+    NUM_ELS().forEach(e=>e.style.animation='none');L.style.transform=tr;a.style.opacity=op;b.style.opacity=op;T.style.setProperty('--p',pp)}
+  else{L.style.transform='';a.style.opacity='';b.style.opacity='';T.style.removeProperty('--p');NUM_ELS().forEach(e=>e.style.animation='')}
+}
+addEventListener('scroll',()=>{if(SDA)return;if(!tick){tick=true;requestAnimationFrame(()=>{tick=false;frame()})}},{passive:true});
 addEventListener('resize',()=>measure());
 
 /* tap a projection bubble to see how the number is made */
