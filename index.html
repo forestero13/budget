@@ -48,6 +48,10 @@ main{max-width:560px;margin:0 auto;padding:0 14px}
 .hero.over small,.hero.over .big{color:var(--bad)}
 .hero .sub{color:var(--mute);font-size:14px;margin-top:4px}
 .proj{position:relative;height:min(40vh,300px);flex:none;margin:0 -14px 14px;background:linear-gradient(transparent,rgba(var(--acc),.08))}
+.pscroll{position:absolute;inset:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+.pscroll::-webkit-scrollbar{display:none}
+.ptrack{position:relative;height:100%}.ptrack svg{position:absolute;left:0;top:0}
+.phint{position:absolute;left:16px;bottom:6px;font-size:12px;color:var(--mute);pointer-events:none}
 .proj svg{position:absolute;inset:0;width:100%;height:100%}
 .pt{position:absolute;transform:translate(-50%,-50%);border:2px solid var(--teal);background:var(--bg);border-radius:14px;padding:3px 10px;text-align:center;font-size:12px;color:var(--mute);line-height:1.2;white-space:nowrap}
 .pt b{display:block;color:var(--ink);font-size:14px;font-variant-numeric:tabular-nums}
@@ -239,7 +243,7 @@ input:focus,select:focus,button:focus-visible{outline:2px solid var(--teal);outl
   <div class="acts"><button class="btn" id="expBtn">Export CSV</button><button class="btn" id="impBtn">Import CSV</button></div>
   <input type="file" id="impFile" accept=".csv,text/csv" hidden>
   <p class="hint" id="dataMsg"></p>
-  <p class="hint" style="text-align:center;margin-top:24px">Version 2.7 · Nov 26, 2026</p>
+  <p class="hint" style="text-align:center;margin-top:24px">Version 2.8 · Nov 26, 2026</p>
 </div></div>
 
 <div class="sheet" id="cfSheet"><div class="panel">
@@ -339,7 +343,7 @@ function compute(){
   const budget=allow*(dayDiff(parse(ts),today)+1)+typeIn('inc',ts,t)-(t>ts?outIn(ts,yest):0)-(once?debt:0);
   const spentToday=outIn(t,t),left=budget-spentToday;
   const inc0=typeIn('inc',t,t),proj=[{d:today,v:left,r:budget-allow-inc0,a:base,pay,inc:inc0,out:spentToday}];
-  for(let i=1;i<=2;i++){const d=addD(today,i),k=iso(d);if(k>P.e)break;const r=proj[i-1].v,ic=typeIn('inc',k,k),o=outIn(k,k);proj.push({d,v:r+allow+ic-o,r,a:base,pay,inc:ic,out:o})}
+  for(let i=1;i<=62;i++){const d=addD(today,i),k=iso(d);if(k>P.e)break;const r=proj[i-1].v,ic=typeIn('inc',k,k),o=outIn(k,k);proj.push({d,v:r+allow+ic-o,r,a:base,pay,inc:ic,out:o})}
   const tm=iso(addD(today,1));
   const periodLeft=left+(t<P.e?allow*dayDiff(today,P.end)+typeIn('inc',tm,P.e)-outIn(tm,P.e):0);
   return{t,ts,today,P,inc,fx,sv,base,allow,pay,debt,once,rolls,budget,spentToday,left,proj,periodLeft};
@@ -478,14 +482,22 @@ function renderHero(){
   $('hero').classList.toggle('over',neg);
   $('heroLbl').textContent=neg?'Over today’s budget':'Today’s Budget';
   $('left').textContent=money(C.left);
-  $('heroSub').textContent=(C.debt?'Paying back '+money(C.debt)+' overspent last month · ':'Spent today '+money(C.spentToday)+' · ')+money(C.periodLeft)+' left until '+fmtD(C.P.end,{month:'short',day:'numeric'});
-  const pr=C.proj,vs=pr.map(p=>p.v),mn=Math.min(...vs),mx=Math.max(...vs),xs=[14,50,86].slice(0,pr.length);
-  const ys=vs.map(v=>mx===mn?55:78-(v-mn)/(mx-mn)*50);
-  let line='';
-  if(pr.length>1){const sl=(ys[ys.length-1]-ys[0])/(xs[xs.length-1]-xs[0]);line='<svg viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="0" y1="'+(ys[0]-sl*xs[0])+'" x2="100" y2="'+(ys[0]+sl*(100-xs[0]))+'" stroke="#f2f4f7" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>'}
-  $('proj').innerHTML=line+pr.map((p,i)=>'<button class="pt'+(p.v<0?' neg':'')+'" data-pi="'+i+'" style="left:'+xs[i]+'%;top:'+ys[i]+'%">'+(i?esc(fmtD(p.d,{weekday:'short'})):'Today')+'<b>'+esc(money(p.v))+'</b></button>').join('')+
-    (pr.length<3?'<div class="pt" style="left:'+(pr.length>1?86:72)+'%;top:'+(pr.length>1?20:30)+'%;border-color:var(--line)">New month<b>'+esc(fmtD(addD(C.P.end,1),{month:'short',day:'numeric'}))+'</b></div>':'');
-  if(pr.length===1)$('proj').querySelector('.pt').style.left='30%';
+  const back=neg?C.proj.find(p=>p.v>=0):null;
+  if(neg){$('heroSub').textContent=back?'Spend nothing and you\u2019re back above '+money(0)+' '+(back===C.proj[1]?'tomorrow':'on '+fmtD(back.d,{weekday:'short',month:'short',day:'numeric'})):'Spending nothing won\u2019t get you above '+money(0)+' before '+fmtD(addD(C.P.end,1),{month:'short',day:'numeric'})}
+  else $('heroSub').textContent=(C.debt?'Paying back '+money(C.debt)+' overspent last month · ':'Spent today '+money(C.spentToday)+' · ')+money(C.periodLeft)+' left until '+fmtD(C.P.end,{month:'short',day:'numeric'});
+  const pr=C.proj,H=$('proj').clientHeight||260,GAP=118,X0=Math.round(Math.min(innerWidth,560)*.16);
+  const vs=pr.map(p=>p.v),mn=Math.min(...vs,neg?0:Infinity),mx=Math.max(...vs,neg?0:-Infinity),Y=v=>mx===mn?H*.55:H*(.8-(v-mn)/(mx-mn)*.58);
+  const W=X0+(pr.length)*GAP+40,xs=pr.map((_,i)=>X0+i*GAP),ys=vs.map(Y);
+  const pts=xs.map((x,i)=>x+','+ys[i].toFixed(1));
+  if(pr.length>1){const sl=(ys[1]-ys[0])/GAP,sl2=(ys[ys.length-1]-ys[ys.length-2])/GAP;pts.unshift('0,'+(ys[0]-sl*X0).toFixed(1));pts.push(W+','+(ys[ys.length-1]+sl2*(W-xs[xs.length-1])).toFixed(1))}
+  const zero=neg&&mx>0?'<line x1="0" x2="'+W+'" y1="'+Y(0).toFixed(1)+'" y2="'+Y(0).toFixed(1)+'" stroke="#5b6270" stroke-dasharray="4 6"/>':'';
+  const nm=fmtD(addD(C.P.end,1),{month:'short',day:'numeric'});
+  $('proj').innerHTML='<div class="pscroll" id="pscroll"><div class="ptrack" style="width:'+W+'px">'+
+    '<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'+zero+'<polyline points="'+pts.join(' ')+'" fill="none" stroke="#f2f4f7" stroke-width="2" stroke-linejoin="round"/></svg>'+
+    pr.map((p,i)=>'<button class="pt'+(p.v<0?' neg':'')+'" data-pi="'+i+'" style="left:'+xs[i]+'px;top:'+ys[i].toFixed(1)+'px">'+(i?esc(i<7?fmtD(p.d,{weekday:'short'}):fmtD(p.d,{weekday:'short'})+' '+p.d.getDate()):'Today')+'<b>'+esc(money(p.v))+'</b></button>').join('')+
+    '<div class="pt" style="left:'+(X0+pr.length*GAP-20)+'px;top:'+Math.round(H*.2)+'px;border-color:var(--line)">New month<b>'+esc(nm)+'</b></div>'+
+    '</div></div>'+(pr.length>3?'<div class="phint">Swipe to see each day if you spend nothing \u2192</div>':'');
+  $('pscroll').addEventListener('scroll',()=>{if(tipI>=0)closeTip()},{passive:true});
 }
 function render(){
   LIVE=null;tipI=-1;C=compute();if(geo)requestAnimationFrame(()=>measure());renderHero();
@@ -546,12 +558,12 @@ function closeTip(){
 }
 function openTip(i,btn){
   closeTip();const p=C.proj[i];if(!p)return;tipI=i;
-  const W=$('proj').clientWidth,x=Math.max(66,Math.min(W-66,btn.offsetLeft)),y=btn.offsetTop;
+  const box=btn.parentElement,W=box.clientWidth,x=Math.max(66,Math.min(W-66,btn.offsetLeft)),y=Math.max(80,Math.min(box.clientHeight-70,btn.offsetTop));
   const row=(l,v)=>'<small>'+l+'</small><b>'+esc(v)+'</b>';
   const t=document.createElement('div');t.className='tip';t.style.left=x+'px';t.style.top=y+'px';
   t.innerHTML='<span class="bd">'+(i?esc(fmtD(p.d,{weekday:'short'})):'Today')+'</span>'+row('Rollover',money(p.r))+row('Daily budget','+'+money(p.a))+(p.pay?row('Payback','-'+money(p.pay)):'')+
     (p.inc?row('Income','+'+money(p.inc)):'')+(p.out?row(i?'Scheduled':'Spent','-'+money(p.out)):'')+'<hr><b class="tot">'+esc(money(p.v))+'</b>';
-  $('proj').appendChild(t);btn.classList.add('hid');
+  box.appendChild(t);btn.classList.add('hid');
   t.animate([{transform:'translate(-50%,-50%) scale(.45)',opacity:.3},{transform:'translate(-50%,-50%) scale(1.05)',opacity:1,offset:.7},{transform:'translate(-50%,-50%) scale(1)',opacity:1}],{duration:260,easing:'cubic-bezier(.2,.9,.3,1)'});
 }
 $('proj').addEventListener('click',e=>{
